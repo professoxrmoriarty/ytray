@@ -10,7 +10,9 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
+using Newtonsoft.Json.Linq;
 using YTray.Models;
+using YTray.Native;
 
 namespace YTray.Core
 {
@@ -22,10 +24,13 @@ namespace YTray.Core
         public string ApplicationDirectory { get; }
         private readonly DispatcherTimer _timer;
         private readonly DispatcherTimer _persistenceTimer;
+        private readonly McpServer _mcpServer;
         private readonly Dictionary<Guid, BrowserLauncher.LaunchResult> _launches =
             new Dictionary<Guid, BrowserLauncher.LaunchResult>();
         private readonly Dictionary<Guid, BrowserWindowTaskbarController> _taskbarControllers =
             new Dictionary<Guid, BrowserWindowTaskbarController>();
+        private readonly Dictionary<Guid, YakitLaunchApproval> _yakitLaunchApprovals =
+            new Dictionary<Guid, YakitLaunchApproval>();
         private readonly HashSet<Guid> _thumbnailInFlight = new HashSet<Guid>();
         private Dictionary<Guid, DateTime> _lastThumbnailAttempt = new Dictionary<Guid, DateTime>();
         private bool _pageRefreshInFlight;
@@ -34,6 +39,7 @@ namespace YTray.Core
         private Guid? _discardingLaunchID;
         private static readonly TimeSpan ThumbnailRefreshInterval = TimeSpan.FromSeconds(12);
         private static readonly TimeSpan PageRefreshInterval = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan YakitLaunchApprovalLifetime = TimeSpan.FromMinutes(2);
         // Private persistence compatibility only. Keep this exact historical directory name so
         // installations made before the YTray rebrand can migrate their local data once.
         private const string LegacyDirectoryName = "Instance" + "Dock";
@@ -74,8 +80,90 @@ namespace YTray.Core
         public ProxyCheckReport? ProxyCheckReport { get; private set; }
         public bool IsProxyAdvancedExpanded { get; set; }
         public Guid? LaunchToken { get; private set; }
+        public bool IsMcpAvailable { get; private set; }
+        public bool IsMcpAutoStartEnabled => Settings.McpAutoStart;
+        public string McpStatusMessage { get; private set; } = "等待 MCP 服务启动";
 
         public bool IsLaunching => LaunchPhase == BrowserLaunchPhase.Preparing || LaunchPhase == BrowserLaunchPhase.Waiting;
+
+        internal void SetMcpStatus(bool available, string message)
+        {
+            IsMcpAvailable = available;
+            McpStatusMessage = message;
+            OnPropertyChanged(nameof(IsMcpAvailable));
+            OnPropertyChanged(nameof(McpStatusMessage));
+        }
+
+        public bool StartMcpService() => _mcpServer.Start();
+
+        public void StopMcpService() => _mcpServer.Stop();
+
+        public void SetMcpAutoStart(bool enabled)
+        {
+            if (Settings.McpAutoStart == enabled) return;
+            Settings.McpAutoStart = enabled;
+            SaveSettings();
+            OnPropertyChanged(nameof(IsMcpAutoStartEnabled));
+        }
+
+        public void SetAutoConnectYakit(bool enabled)
+        {
+            if (Settings.AutoConnectYakit == enabled) return;
+            Settings.AutoConnectYakit = enabled;
+            if (!enabled) _yakitLaunchApprovals.Clear();
+            SaveSettings();
+        }
+
+        internal void RememberYakitLaunch(Guid instanceID, DateTime? now = null)
+        {
+            if (!Settings.AutoConnectYakit) return;
+            _yakitLaunchApprovals[instanceID] = new YakitLaunchApproval
+            {
+                ExpiresAt = (now ?? DateTime.UtcNow) + YakitLaunchApprovalLifetime,
+            };
+        }
+
+        internal bool TryClaimYakitLaunch(Guid instanceID, string requestID, out string reason,
+            DateTime? now = null)
+        {
+            reason = "";
+            if (!Settings.AutoConnectYakit)
+            {
+                reason = "disabled";
+                return false;
+            }
+            if (!_yakitLaunchApprovals.TryGetValue(instanceID, out var approval))
+            {
+                reason = "not_found";
+                return false;
+            }
+            if ((now ?? DateTime.UtcNow) > approval.ExpiresAt)
+            {
+                _yakitLaunchApprovals.Remove(instanceID);
+                reason = "expired";
+                return false;
+            }
+            if (!Instances.Any(instance => instance.Id == instanceID && instance.Status == InstanceStatus.Running))
+            {
+                _yakitLaunchApprovals.Remove(instanceID);
+                reason = "not_running";
+                return false;
+            }
+            if (approval.RequestID == null)
+            {
+                approval.RequestID = requestID;
+                return true;
+            }
+            if (approval.RequestID == requestID) return true;
+            reason = "already_claimed";
+            return false;
+        }
+
+        private sealed class YakitLaunchApproval
+        {
+            internal DateTime ExpiresAt { get; set; }
+            internal string? RequestID { get; set; }
+        }
 
         public List<BrowserInstance> RunningInstances => Instances.Where(i => i.Status == InstanceStatus.Running).ToList();
         public List<BrowserInstance> HistoryInstances => Instances.Where(i => i.Status != InstanceStatus.Running).ToList();
@@ -93,6 +181,7 @@ namespace YTray.Core
         {
             var usesDefaultApplicationDirectory = applicationDirectory == null;
             ApplicationDirectory = applicationDirectory ?? StatePersistence.DefaultApplicationDirectory;
+            _mcpServer = new McpServer(this);
             // Best-effort migration from the private pre-rebrand persistence directory to YTray.
             if (usesDefaultApplicationDirectory) MigrateLegacyDirectoryIfNeeded();
             try { Directory.CreateDirectory(ApplicationDirectory); } catch { }
@@ -399,6 +488,21 @@ namespace YTray.Core
                     catch { process = null; }
                 }
 
+                var gracefulCloseRequested = false;
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    using var browser = new BrowserDevTools();
+                    await browser.ConnectAsync(current.DebugPort, timeout.Token);
+                    gracefulCloseRequested = true;
+                    await browser.SendAsync("Browser.close", new JObject(), timeout.Token);
+                }
+                catch { /* Browser.close commonly closes its own CDP socket before replying. */ }
+
+                for (var attempt = 0; gracefulCloseRequested && attempt < 30
+                    && current.ProcessID > 0 && IsExpectedInstanceProcess(current); attempt++)
+                    await Task.Delay(100);
+
                 try
                 {
                     if (process != null && IsProcessUsable(process)) process.Kill();
@@ -671,10 +775,7 @@ namespace YTray.Core
                     var dispatcher = System.Windows.Application.Current?.Dispatcher;
                     if (dispatcher == null || dispatcher.HasShutdownStarted) return;
                     dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        if (_launches.TryGetValue(result.Instance.Id, out var current) && ReferenceEquals(current, result))
-                            MarkStopped(result.Instance.Id);
-                    }),
+                        CrashGuard.Observe(RecoverTransferredProcessAsync(result), "browser-process-transfer")),
                         DispatcherPriority.Background);
                 };
 
@@ -684,6 +785,7 @@ namespace YTray.Core
                     if (old != null) Instances.Remove(old);
                 }
                 Instances.Insert(0, result.Instance);
+                RememberYakitLaunch(result.Instance.Id);
                 Save();
                 LaunchingInstanceID = result.Instance.Id;
                 LaunchMessage = $"正在启动 {runtime.DisplayTitle}…";
@@ -886,6 +988,7 @@ namespace YTray.Core
                 return;
             }
             Instances.Remove(launch.Instance);
+            _yakitLaunchApprovals.Remove(launch.Instance.Id);
             if (restoring != null) Instances.Insert(0, restoring);
             else
             {
@@ -1270,6 +1373,7 @@ namespace YTray.Core
                 if (i.ProcessID <= 0 || !IsExpectedInstanceProcess(i))
                 {
                     i.Status = InstanceStatus.Stopped;
+                    _yakitLaunchApprovals.Remove(i.Id);
                     ReleaseTaskbarController(i.Id);
                     BrowserProcessIcon.Remove(i.Id, ApplicationDirectory);
                     ProxyAuthenticationExtension.Remove(i.Id, ApplicationDirectory);
@@ -1283,13 +1387,21 @@ namespace YTray.Core
         {
             if (instance == null || instance.ProcessID <= 0) return false;
             if (_launches.TryGetValue(instance.Id, out var owned))
-                return owned.Process.Id == instance.ProcessID && IsProcessUsable(owned.Process);
+            {
+                if (owned.Process.Id == instance.ProcessID && IsProcessUsable(owned.Process)) return true;
+            }
 
+            if (IsExpectedProcess(instance, instance.ProcessID)) return true;
+            return TryAdoptDebugPortProcess(instance);
+        }
+
+        private bool IsExpectedProcess(BrowserInstance instance, int processID)
+        {
             var expectedExecutable = RuntimeFor(instance)?.ExecutablePath;
-            if (string.IsNullOrWhiteSpace(expectedExecutable) || !File.Exists(expectedExecutable)) return false;
+            if (processID <= 0 || string.IsNullOrWhiteSpace(expectedExecutable) || !File.Exists(expectedExecutable)) return false;
             try
             {
-                using (var process = System.Diagnostics.Process.GetProcessById(instance.ProcessID))
+                using (var process = System.Diagnostics.Process.GetProcessById(processID))
                 {
                     if (process.HasExited) return false;
                     var actualExecutable = process.MainModule?.FileName;
@@ -1305,8 +1417,34 @@ namespace YTray.Core
             catch { return false; }
         }
 
+        private bool TryAdoptDebugPortProcess(BrowserInstance instance)
+        {
+            var processID = TcpListenerProcess.FindOwnerProcessId(instance.DebugPort);
+            if (processID <= 0 || processID == instance.ProcessID || !IsExpectedProcess(instance, processID)) return false;
+            var previousProcessID = instance.ProcessID;
+            instance.ProcessID = processID;
+            ReleaseTaskbarController(instance.Id);
+            Save();
+            DiagnosticLog.Info("instance.process-transfer",
+                $"adopted browser process; instance={instance.Id}; oldPid={previousProcessID}; pid={processID}; debugPort={instance.DebugPort}");
+            return true;
+        }
+
+        private async Task RecoverTransferredProcessAsync(BrowserLauncher.LaunchResult launch)
+        {
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                if (!_launches.TryGetValue(launch.Instance.Id, out var current) || !ReferenceEquals(current, launch)) return;
+                if (TryAdoptDebugPortProcess(launch.Instance)) return;
+                await Task.Delay(100);
+            }
+            if (_launches.TryGetValue(launch.Instance.Id, out var pending) && ReferenceEquals(pending, launch))
+                MarkStopped(launch.Instance.Id);
+        }
+
         private void MarkStopped(Guid id)
         {
+            _yakitLaunchApprovals.Remove(id);
             if (_launches.TryGetValue(id, out var launch))
             {
                 _launches.Remove(id);
@@ -1599,6 +1737,7 @@ namespace YTray.Core
         public void Dispose()
         {
             if (_disposed) return;
+            _mcpServer.Dispose();
             _timer?.Stop();
             _persistenceTimer?.Stop();
             PersistPendingState();

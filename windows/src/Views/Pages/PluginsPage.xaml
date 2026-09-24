@@ -28,7 +28,7 @@
         </Style>
     </Page.Resources>
     <Grid Margin="25,20,25,22">
-        <Grid.RowDefinitions><RowDefinition Height="94"/><RowDefinition Height="54"/><RowDefinition Height="13"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="94"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel><TextBlock Text="本地插件" Style="{StaticResource PageTitle}" FontSize="27"/><TextBlock Text="启用的插件会默认加载；工具栏固定设置将在下次启动实例时生效" Style="{StaticResource PageSubtitle}" FontSize="13" Margin="0,5,0,0"/><StackPanel Orientation="Horizontal" Margin="0,9,0,0"><Ellipse x:Name="PluginCountDot" Width="8" Height="8" Fill="{DynamicResource SuccessBrush}" Margin="0,0,9,0"/><TextBlock x:Name="PluginCountLabel" Text="0 个插件" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}"/></StackPanel></StackPanel>
@@ -36,25 +36,7 @@
                 <StackPanel Orientation="Horizontal"><Path Data="M 8 2 L 8 14 M 2 8 L 14 8" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5"/><TextBlock Text="添加或扫描插件…" Margin="8,0,0,0"/></StackPanel>
             </Button>
         </Grid>
-        <Border Grid.Row="1" Style="{StaticResource SurfaceBorder}" Padding="16,0">
-            <Grid VerticalAlignment="Center">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="20" Height="20" CornerRadius="10" BorderBrush="{DynamicResource TextSecondaryBrush}" BorderThickness="1.2"><TextBlock Text="i" FontFamily="Georgia" FontWeight="Bold" Foreground="{DynamicResource TextSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                    <TextBlock Text="可多选目录；插件根目录会自动扫描 manifest.json" Margin="14,0,0,0" FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
-                    <Border x:Name="ExtensionUpdateBadge" Margin="14,0,0,0" Padding="8,3" CornerRadius="9" Background="{DynamicResource BrandPaleBrush}" Visibility="Collapsed" VerticalAlignment="Center">
-                        <TextBlock Text="Yakit 插件有新版本" FontSize="10.5" Foreground="{DynamicResource BrandOrangeBrush}"/>
-                    </Border>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="ExtensionStatusText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,10,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
-                    <ProgressBar x:Name="ExtensionProgressBar" Width="130" Height="6" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="Collapsed"/>
-                    <Button x:Name="ExtensionRefreshBtn" Content="检查更新" Click="ExtensionRefresh_Click" Height="32" FontSize="11.5" Margin="0,0,8,0" Padding="12,0"/>
-                    <Button x:Name="ExtensionInstallBtn" Click="ExtensionInstall_Click" Height="32" FontSize="11.5" MinWidth="118" Padding="12,0" Style="{StaticResource YTrayPrimaryButton}"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions><ColumnDefinition Width="1.72*"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource SurfaceBorder}" CornerRadius="5,0,0,5">
                 <Grid>

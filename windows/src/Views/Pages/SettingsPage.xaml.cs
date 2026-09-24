@@ -11,7 +11,6 @@ namespace YTray.Views.Pages
     public partial class SettingsPage : Page
     {
         private readonly InstanceStore _store;
-        private readonly AppUpdateService _updater = AppUpdateService.Shared;
         private bool _loadingControls;
         private int _feedbackGeneration;
 
@@ -29,8 +28,6 @@ namespace YTray.Views.Pages
             ThemeManager.ThemeChanged -= OnThemeChanged;
             ThemeManager.ThemeChanged += OnThemeChanged;
             SyncThemeSelection();
-            AutomaticUpdatesCheck.IsChecked = _store.Settings.CheckForAppUpdates;
-            AutomaticUpdatesCheck.IsEnabled = _updater.Enabled;
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -57,6 +54,7 @@ namespace YTray.Views.Pages
         {
             HomeUrlBox.Text = _store.Settings.HomeURL;
             DebugPortBox.Text = _store.Settings.DebugPort.ToString();
+            AutoConnectYakitCheck.IsChecked = _store.Settings.AutoConnectYakit;
             WebRTCCheck.IsChecked = _store.Settings.RestrictWebRTC;
             NotificationsCheck.IsChecked = _store.Settings.DisableNotifications;
             CertCheck.IsChecked = _store.Settings.IgnoreCertificateErrors;
@@ -123,6 +121,7 @@ namespace YTray.Views.Pages
             }
             _store.Settings.HomeURL = homeUrl;
             _store.Settings.DebugPort = port;
+            _store.SetAutoConnectYakit(AutoConnectYakitCheck.IsChecked == true);
             _store.Settings.RestrictWebRTC = WebRTCCheck.IsChecked == true;
             _store.Settings.DisableNotifications = NotificationsCheck.IsChecked == true;
             _store.Settings.IgnoreCertificateErrors = CertCheck.IsChecked == true;
@@ -138,6 +137,7 @@ namespace YTray.Views.Pages
             var defaults = new LaunchSettings(_store.Settings.DefaultRuntimeID);
             HomeUrlBox.Text = defaults.HomeURL;
             DebugPortBox.Text = defaults.DebugPort.ToString();
+            AutoConnectYakitCheck.IsChecked = defaults.AutoConnectYakit;
             WebRTCCheck.IsChecked = defaults.RestrictWebRTC;
             NotificationsCheck.IsChecked = defaults.DisableNotifications;
             CertCheck.IsChecked = defaults.IgnoreCertificateErrors;
@@ -155,11 +155,6 @@ namespace YTray.Views.Pages
             ShowFeedback("已填入推荐参数");
         }
 
-        private void AutomaticUpdates_Click(object sender, RoutedEventArgs e)
-        {
-            _store.Settings.CheckForAppUpdates = AutomaticUpdatesCheck.IsChecked == true;
-            _store.SaveSettings();
-        }
 
         private async void ShowFeedback(string message, bool isError = false)
         {

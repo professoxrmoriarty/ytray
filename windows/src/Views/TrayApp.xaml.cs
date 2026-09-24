@@ -22,6 +22,7 @@ namespace YTray
         private Icon? _trayIcon;
         private WidgetView? _widget;
         private ManagerView? _manager;
+        private bool _managerShowInProgress;
         private readonly EdgeDock _edgeDock;
         private System.Windows.Forms.ContextMenu? _menu;
         private bool _statusRefreshScheduled;
@@ -54,6 +55,7 @@ namespace YTray
             UpdateStatusTitle();
             if (_store.Settings.EdgeDockEnabled) _edgeDock.ShowDock(remember: false);
             _updater.AutomaticChecks = () => _store.Settings.CheckForAppUpdates;
+            _updater.AutomaticCheckCompanion = () => _store.RefreshExtensionManifestAsync();
             _updater.CanInstall = () => !_store.IsLaunching && !_store.IsInstalling && !_store.IsInstallingExtension
                 && !ComponentDispatcher.IsThreadModal;
             _updater.Start();
@@ -192,22 +194,28 @@ namespace YTray
 
         public void ShowManager(string? section = null)
         {
-            _widget?.HideWidget();
-            if (_manager == null)
+            if (_managerShowInProgress) return;
+            _managerShowInProgress = true;
+            try
             {
-                _manager = new ManagerView(_store, _launchAtLogin);
-                _manager.Closed += OnManagerClosed;
-            }
-            if (!_manager.IsVisible) _manager.Show();
-            if (!string.IsNullOrWhiteSpace(section)) _manager.NavigateTo(section!);
-            if (_manager.WindowState == WindowState.Minimized) _manager.WindowState = WindowState.Normal;
-            _manager.Activate();
-            _manager.Focus();
+                _widget?.HideWidget();
+                if (_manager == null)
+                {
+                    _manager = new ManagerView(_store, _launchAtLogin);
+                    _manager.Closed += OnManagerClosed;
+                }
+                if (!_manager.IsVisible) _manager.Show();
+                if (!string.IsNullOrWhiteSpace(section)) _manager.NavigateTo(section!);
+                if (_manager.WindowState == WindowState.Minimized) _manager.WindowState = WindowState.Normal;
+                _manager.Activate();
+                _manager.Focus();
 
-            // Activate() alone is not reliable when the window is restored from a tray event.
-            // The tray click is foreground user input, so Windows permits this foreground handoff.
-            var handle = new WindowInteropHelper(_manager).Handle;
-            if (handle != IntPtr.Zero) Win32.SetForegroundWindow(handle);
+                // Activate() alone is not reliable when the window is restored from a tray event.
+                // The tray click is foreground user input, so Windows permits this foreground handoff.
+                var handle = new WindowInteropHelper(_manager).Handle;
+                if (handle != IntPtr.Zero) Win32.SetForegroundWindow(handle);
+            }
+            finally { _managerShowInProgress = false; }
         }
 
         private void OpenUpdatePage()

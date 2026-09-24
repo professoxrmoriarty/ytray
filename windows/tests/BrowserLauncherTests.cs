@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -107,6 +110,46 @@ namespace YTray.Tests
             Assert.AreEqual(BrowserKind.ChromeCanary, BrowserKindExtensions.Infer("Google Chrome Canary", "/tmp/chrome"));
             Assert.AreEqual(BrowserKind.Chromium, BrowserKindExtensions.Infer("Chromium", "/tmp/chromium"));
             Assert.AreEqual(BrowserKind.Chrome, BrowserKindExtensions.Infer("Google Chrome", "/tmp/chrome"));
+        }
+
+        [TestMethod]
+        public void RunningInstanceAdoptsTheProcessListeningOnItsDebugPort()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "YTrayProcessTransferTests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            using var process = Process.GetCurrentProcess();
+            var runtime = new BrowserRuntime
+            {
+                Id = Guid.NewGuid(), Name = "Test Browser", ExecutablePath = process.MainModule!.FileName,
+            };
+            var instance = new BrowserInstance
+            {
+                RuntimeID = runtime.Id,
+                ProcessID = int.MaxValue,
+                DebugPort = ((IPEndPoint)listener.LocalEndpoint).Port,
+                StartedAt = process.StartTime,
+                Status = InstanceStatus.Running,
+            };
+            try
+            {
+                StatePersistence.Save(directory, new PersistedState
+                {
+                    Runtimes = new List<BrowserRuntime> { runtime },
+                    Instances = new List<BrowserInstance> { instance },
+                });
+
+                using var store = new InstanceStore(directory, discoverSystemBrowsers: false, runMaintenance: false);
+
+                Assert.AreEqual(InstanceStatus.Running, store.Instances.Single().Status);
+                Assert.AreEqual(process.Id, store.Instances.Single().ProcessID);
+            }
+            finally
+            {
+                listener.Stop();
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
         }
 
         [TestMethod]
@@ -402,6 +445,7 @@ namespace YTray.Tests
             Assert.IsTrue(args.Contains(@"--user-data-dir=C:\tmp\profile"));
             Assert.IsTrue(args.Contains("--remote-debugging-address=127.0.0.1"));
             Assert.IsTrue(args.Contains("--remote-debugging-port=9333"));
+            Assert.IsTrue(args.Contains("--hide-crash-restore-bubble"));
             Assert.IsTrue(args.Contains("--remote-allow-origins=http://127.0.0.1:9333"));
             Assert.IsTrue(args.Contains("--no-first-run"));
             Assert.IsTrue(args.Contains("--no-default-browser-check"));

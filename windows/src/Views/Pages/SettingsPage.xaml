@@ -55,9 +55,11 @@
 
             <Border Grid.Column="2" Style="{StaticResource SurfaceBorder}" Padding="24,20">
                 <Grid>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <StackPanel>
                         <TextBlock Text="浏览器默认行为" Style="{StaticResource SectionTitle}" FontSize="15" Margin="0,0,0,22"/>
+                        <CheckBox x:Name="AutoConnectYakitCheck" Content="启动后自动连接 Yakit" FontSize="12.5"/>
+                        <TextBlock Text="仅自动批准当前 YTray 启动或恢复的实例" Margin="24,7,0,19" FontSize="10.5" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         <CheckBox x:Name="WebRTCCheck" Content="禁用 WebRTC" FontSize="12.5" Margin="0,0,0,19"/>
                         <CheckBox x:Name="NotificationsCheck" Content="禁用浏览器通知" FontSize="12.5" Margin="0,0,0,19"/>
                         <CheckBox x:Name="CertCheck" Content="忽略证书错误" FontSize="12.5"/>
@@ -65,16 +67,6 @@
                         <CheckBox x:Name="ColorizeCheck" Content="使用 A/B/C/D 独立主题色" FontSize="12.5" Margin="0,19,0,0"/>
                         <TextBlock Text="主题色仅影响新 Profile；恢复历史保留原主题" Margin="0,10,0,0" FontSize="10.5" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
                     </StackPanel>
-                    <Border Grid.Row="2" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="0,16,0,0">
-                        <StackPanel>
-                            <TextBlock Text="应用更新" Style="{StaticResource SectionTitle}" FontSize="14"/>
-                            <CheckBox x:Name="AutomaticUpdatesCheck" Content="自动检查新版本" Click="AutomaticUpdates_Click"
-                                      FontSize="11.5" Margin="0,10,0,0"/>
-                            <TextBlock Text="后台定期检查，不会自动下载或安装。版本与更新说明可在窗口左上角查看。"
-                                       TextWrapping="Wrap" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                                       Margin="0,7,0,0"/>
-                        </StackPanel>
-                    </Border>
                 </Grid>
             </Border>
         </Grid>

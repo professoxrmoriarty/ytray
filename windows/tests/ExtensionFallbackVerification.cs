@@ -118,6 +118,7 @@ namespace YTray.Tests
                         Assert.AreEqual("http://127.0.0.1:" + server.Port, instance.SettingsSnapshot!.ProxyServer);
                     }
                     Assert.IsTrue(Await(store.StopAsync(instance)));
+                    Assert.AreEqual("Normal", JObject.Parse(File.ReadAllText(Path.Combine(instance.ProfilePath, "Default", "Preferences")))["profile"]?["exit_type"]?.Value<string>());
                     Record(output, mode + ": extension list, content script, built-in bootstrap, CDP page and screenshot verified");
                 }
 

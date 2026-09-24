@@ -33,6 +33,7 @@ macOS 版本使用 Swift、AppKit 与 SwiftUI；Windows 版本使用 C# 与 WPF�
 - 显式区分“无代理启动”和“使用 HTTP 代理启动”，避免网络路径含糊。
 - 调试服务只绑定 `127.0.0.1`，端口占用时自动向后选择。
 - 运行实例提供页面缩略图、PID、浏览器版本、调试端口、停止和截图入口。
+- 内置 MCP 服务允许本机 agent 列出运行时与实例，并打开、聚焦或停止浏览器实例。
 - 历史记录可以恢复同一个身份环境、用户目录、插件、角标与最近页面。
 - 支持本机 Chrome、Chrome Beta、Chrome Canary、Chrome for Testing、Chromium 与 Edge。
 - 安装包构建时下载并校验最新 Yakit Browser Agent，再作为默认本地插件内置。
@@ -96,6 +97,24 @@ Release CI 支持 Developer ID hardened runtime 签名，并在 Apple 账号凭�
 4. 在小组件或“运行与历史”中管理实例；停止后可从历史恢复同一个身份。
 
 ![YTray 自定义启动向导](/docs/images/v0.1.0/ytray-custom-launch.png)
+
+### MCP（Agent 控制）
+
+YTray 默认随应用启动 Streamable HTTP MCP 服务，也可以在侧栏的 **MCP** 页面随时启动、停止或关闭自动启动。端点为：
+
+```text
+http://127.0.0.1:19222/mcp
+```
+
+把该 URL 添加到支持远程 MCP URL 的 agent 客户端即可。服务提供以下工具：
+
+- `list_browser_runtimes`：列出可用浏览器及默认运行时；
+- `list_browser_instances`：列出运行中实例，可选包含历史实例；
+- `open_browser_instance`：用默认或指定运行时打开新实例，或按实例 ID 恢复历史实例；
+- `focus_browser_instance`：把指定运行中实例切到前台；
+- `stop_browser_instance`：停止实例并保留历史记录。
+
+MCP 只监听 `127.0.0.1`，并校验 HTTP `Host` 与 `Origin`。启动 URL 仅接受 `http`、`https`、`chrome` 和 `about` 协议；代理密码不会出现在工具返回值中。端口被其他程序占用时，YTray 继续正常运行，并在 MCP 页面和诊断日志中显示启动失败原因。
 
 ### 数据位置
 
@@ -219,6 +238,7 @@ docs/images/v0.1.0/     由应用真实渲染的版本化截图
 - macOS 状态文件限制为当前用户读写；代理认证临时扩展在浏览器退出或启动失败后清理。
 - Windows 开机启动只写当前用户范围，不修改系统级启动服务。
 - 浏览器调试端口只监听回环地址。
+- MCP 服务只监听 `127.0.0.1:19222`，并拒绝非本机 Host 与 Origin。
 - 下载的 Chrome for Testing 和内置插件在使用前校验清单与 SHA-256。
 
 源码公开于本仓库。仓库当前未包含单独的 LICENSE 文件；复用或分发前请先确认适用授权。

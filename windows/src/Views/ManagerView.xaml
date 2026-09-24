@@ -14,6 +14,7 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <SolidColorBrush x:Key="UpdateCardBorderBrush" Color="{DynamicResource BrandOrangeColor}" Opacity="0.38"/>
         <Style x:Key="NavListBoxItem" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="7,2"/>
             <Setter Property="Padding" Value="0"/>
@@ -99,6 +100,32 @@
                                 <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource UpdatePaleBrush}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource UpdateTextBrush}"/>
                             </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="UpdateAutoSwitch" TargetType="ToggleButton">
+            <Setter Property="Width" Value="38"/>
+            <Setter Property="Height" Value="21"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Track" CornerRadius="11" Background="{DynamicResource SurfaceMutedBrush}"
+                                BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="1">
+                            <Ellipse x:Name="Thumb" Width="15" Height="15" Margin="2" HorizontalAlignment="Left"
+                                     Fill="{DynamicResource TextTertiaryBrush}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource BrandOrangeBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BrandOrangeBrush}"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Thumb" Property="Fill" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -202,43 +229,99 @@
                     <Popup x:Name="UpdatePopup" PlacementTarget="{Binding ElementName=VersionButton}"
                            Placement="Bottom" VerticalOffset="5" AllowsTransparency="True"
                            PopupAnimation="Fade" StaysOpen="False" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                        <Border Width="400" MaxHeight="450" Padding="17,16,17,14" CornerRadius="8"
+                        <Border Width="420" MaxHeight="650" CornerRadius="8" ClipToBounds="True"
                                 Background="{DynamicResource SurfaceRaisedBrush}"
                                 BorderBrush="{DynamicResource WindowBorderBrush}" BorderThickness="1">
                             <Border.Effect><DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.25"/></Border.Effect>
                             <Grid>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="5"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="12"/><RowDefinition Height="Auto"/><RowDefinition Height="12"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="10"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="49"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="UpdatePopupTitle" Text="YTray" FontSize="16" FontWeight="SemiBold"/>
-                                    <Border x:Name="UpdatePopupBadge" Grid.Column="1" Padding="8,3" CornerRadius="9"
-                                            Background="{DynamicResource UpdatePaleBrush}" Visibility="Collapsed">
-                                        <TextBlock Text="新版本" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource UpdateTextBrush}"/>
-                                    </Border>
-                                </Grid>
-                                <TextBlock x:Name="UpdatePopupStatus" Grid.Row="2" FontSize="11"
-                                           Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
-                                <Border Grid.Row="3" VerticalAlignment="Center" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0"/>
-                                <TextBox x:Name="UpdatePopupNotes" Grid.Row="4" MaxHeight="235" MinHeight="36"
-                                         IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                         BorderThickness="0" Padding="0" Background="Transparent" FontSize="11.5"
-                                         Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                <TextBlock x:Name="UpdatePopupLastCheck" Grid.Row="6" FontSize="10"
-                                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                <Grid Grid.Row="8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <Button x:Name="UpdateReleaseNotesButton" Content="查看完整说明" Click="OpenReleaseNotes_Click"
-                                            Style="{StaticResource YTrayGhostButton}" Padding="8,0" Height="32"/>
-                                    <Button x:Name="UpdateDownloadButton" Grid.Column="2" Content="手动下载" Click="DownloadUpdate_Click"
-                                            Style="{StaticResource YTrayGhostButton}" Padding="10,0" Height="32"/>
-                                    <Button x:Name="UpdateActionButton" Grid.Column="4" Content="检查更新" Click="UpdateAction_Click"
-                                            Style="{StaticResource YTrayPrimaryButton}" MinWidth="92" Height="32" Padding="12,0"/>
-                                </Grid>
+                                <Border BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,0,0,1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Grid Margin="14,0,0,0" HorizontalAlignment="Left">
+                                            <TextBlock Text="更新通知" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <Border Height="2" Background="{DynamicResource BrandOrangeBrush}" VerticalAlignment="Bottom"/>
+                                        </Grid>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,14,0" VerticalAlignment="Center">
+                                            <TextBlock Text="自动检测更新" Margin="0,0,8,0" FontSize="11.5"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                            <ToggleButton x:Name="UpdateAutoCheck" Click="UpdateAutoCheck_Click"
+                                                          Style="{StaticResource UpdateAutoSwitch}" AutomationProperties.Name="自动检测更新"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Row="1" Margin="12,10,12,0" CornerRadius="5" ClipToBounds="True"
+                                        BorderBrush="{DynamicResource UpdateCardBorderBrush}" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="Auto"/><RowDefinition Height="38"/></Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource BrandPaleBrush}">
+                                            <Grid Margin="10,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <Image Source="pack://application:,,,/Assets/Icons/ytray-app.ico" Width="27" Height="27" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                <StackPanel Grid.Column="1" Margin="8,0,8,0" VerticalAlignment="Center">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock x:Name="UpdatePopupTitle" Text="YTray" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource BrandOrangeBrush}"/>
+                                                        <Border x:Name="UpdatePopupBadge" Margin="7,0,0,0" Padding="6,1" CornerRadius="7" Background="{DynamicResource SurfaceRaisedBrush}" Visibility="Collapsed">
+                                                            <TextBlock Text="新版本" FontSize="9.5" Foreground="{DynamicResource BrandOrangeBrush}"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <TextBlock x:Name="UpdatePopupStatus" Margin="0,3,0,0" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <Button x:Name="UpdateActionButton" Grid.Column="2" Content="检查更新" Click="UpdateAction_Click"
+                                                        Style="{StaticResource YTrayGhostButton}" Foreground="{DynamicResource BrandOrangeBrush}" Height="30" Padding="8,0"/>
+                                            </Grid>
+                                        </Border>
+                                        <TextBox x:Name="UpdatePopupNotes" Grid.Row="1" MaxHeight="150" MinHeight="72" Margin="12,10"
+                                                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                                 BorderThickness="0" Padding="0" Background="Transparent" FontSize="11.5" TextBlock.LineHeight="19"
+                                                 Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <Border Grid.Row="2" Margin="10,0" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="UpdatePopupLastCheck" FontSize="9.5" Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center"/>
+                                                <Button x:Name="UpdateReleaseNotesButton" Grid.Column="1" Content="完整说明" Click="OpenReleaseNotes_Click" Style="{StaticResource YTrayGhostButton}" Padding="8,0" Height="28"/>
+                                                <Button x:Name="UpdateDownloadButton" Grid.Column="2" Content="手动下载" Click="DownloadUpdate_Click" Style="{StaticResource YTrayGhostButton}" Padding="8,0" Height="28"/>
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Row="2" Margin="12,10,12,12" CornerRadius="5" ClipToBounds="True"
+                                        BorderBrush="{DynamicResource UpdateCardBorderBrush}" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="Auto"/><RowDefinition Height="38"/></Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource BrandPaleBrush}">
+                                            <Grid Margin="10,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <Border Width="27" Height="27" CornerRadius="14" Background="{DynamicResource BrandOrangeBrush}">
+                                                    <TextBlock Text="Y" Foreground="White" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="8,0,8,0" VerticalAlignment="Center">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock x:Name="ExtensionPopupTitle" Text="Yakit Browser Agent" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource BrandOrangeBrush}"/>
+                                                        <Border x:Name="ExtensionPopupBadge" Margin="7,0,0,0" Padding="6,1" CornerRadius="7" Background="{DynamicResource SurfaceRaisedBrush}" Visibility="Collapsed">
+                                                            <TextBlock Text="新版本" FontSize="9.5" Foreground="{DynamicResource BrandOrangeBrush}"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <TextBlock x:Name="ExtensionPopupVersion" Margin="0,3,0,0" FontSize="10.5" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <Button x:Name="ExtensionActionButton" Grid.Column="2" Content="检查更新" Click="ExtensionAction_Click"
+                                                        Style="{StaticResource YTrayGhostButton}" Foreground="{DynamicResource BrandOrangeBrush}" Height="30" Padding="8,0"/>
+                                            </Grid>
+                                        </Border>
+                                        <TextBlock x:Name="ExtensionPopupNotes" Grid.Row="1" MinHeight="64" Margin="12,10" FontSize="11.5" LineHeight="19"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                                        <Border Grid.Row="2" Margin="10,0" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="ExtensionPopupStatus" FontSize="9.5" Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                                <ProgressBar x:Name="ExtensionPopupProgress" Grid.Column="1" Width="100" Height="5" Visibility="Collapsed" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Border>
                             </Grid>
                         </Border>
                     </Popup>
@@ -265,6 +348,9 @@
                         </ListBoxItem>
                         <ListBoxItem x:Name="NavPlugins" Tag="plugins" Selected="Nav_Selected">
                             <StackPanel Orientation="Horizontal"><Path Data="M 2 2 L 8 2 L 8 8 L 2 8 Z M 8 2 L 14 2 L 14 8 L 8 8 M 2 8 L 8 8 L 8 14 L 2 14" Style="{StaticResource NavIconPath}"/><TextBlock Text="插件" Style="{StaticResource NavText}"/></StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem x:Name="NavMcp" Tag="mcp" Selected="Nav_Selected">
+                            <StackPanel Orientation="Horizontal"><Path Data="M 3 2.5 L 13 2.5 L 13 6.5 L 3 6.5 Z M 3 9.5 L 13 9.5 L 13 13.5 L 3 13.5 Z M 5 4.5 L 5.1 4.5 M 5 11.5 L 5.1 11.5" Style="{StaticResource NavIconPath}"/><TextBlock Text="MCP" Style="{StaticResource NavText}"/></StackPanel>
                         </ListBoxItem>
                         <ListBoxItem x:Name="NavStartup" Tag="startup" Selected="Nav_Selected">
                             <StackPanel Orientation="Horizontal"><Path Data="M 8 1 L 8 8 M 3.1 3.4 A 6.2 6.2 0 1 0 12.9 3.4" Style="{StaticResource NavIconPath}"/><TextBlock Text="开机启动" Style="{StaticResource NavText}"/></StackPanel>

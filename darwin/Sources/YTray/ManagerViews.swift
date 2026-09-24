@@ -7,6 +7,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
     case settings = "启动设置"
     case instances = "运行与历史"
     case plugins = "插件管理"
+    case mcp = "MCP"
     case launchAtLogin = "开机启动"
     var id: String { rawValue }
     var icon: String {
@@ -16,6 +17,7 @@ enum ManagerSection: String, CaseIterable, Identifiable {
         case .settings: return "slider.horizontal.3"
         case .instances: return "rectangle.stack"
         case .plugins: return "puzzlepiece.extension"
+        case .mcp: return "server.rack"
         case .launchAtLogin: return "power"
         }
     }
@@ -79,6 +81,7 @@ struct ManagerView: View {
                 case .settings: SettingsPage(store: store, quitApplication: quitApplication)
                 case .instances: InstancesPage(store: store)
                 case .plugins: PluginsPage(store: store)
+                case .mcp: MCPPage(store: store)
                 case .launchAtLogin: LaunchAtLoginPage(manager: launchAtLogin)
                 }
             }
@@ -92,7 +95,7 @@ struct ManagerView: View {
         .accentColor(Brand.orange)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                AppUpdateVersionButton(updater: updater, presenter: updatePopover)
+                AppUpdateVersionButton(updater: updater, store: store, presenter: updatePopover)
             }
         }
         .sheet(isPresented: $showWizard) { CustomLaunchWizard(store: store, isPresented: $showWizard) }
@@ -120,6 +123,7 @@ struct ManagerView: View {
 @MainActor
 private struct AppUpdateVersionButton: View {
     @ObservedObject var updater: AppUpdateManager
+    @ObservedObject var store: InstanceStore
     let presenter: AppUpdatePopoverPresenter
     @State private var isHovered = false
 
@@ -127,22 +131,24 @@ private struct AppUpdateVersionButton: View {
         updater.isUpdateAvailable ? updater.availableVersion ?? updater.currentVersion : updater.currentVersion
     }
 
+    private var hasUpdate: Bool { updater.isUpdateAvailable || store.isExtensionUpdateAvailable }
+
     var body: some View {
         Button {
-            presenter.toggle()
+            presenter.toggle(store: store)
         } label: {
             HStack(spacing: 6) {
                 Text("v\(displayVersion)").monospacedDigit()
-                if updater.isUpdateAvailable {
+                if hasUpdate {
                     Circle().fill(Brand.orange).frame(width: 7, height: 7)
                 }
             }
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(updater.isUpdateAvailable ? Color.orange : Color.secondary)
+            .foregroundStyle(hasUpdate ? Brand.orange : Color.secondary)
             .padding(.horizontal, 9)
             .frame(height: 24)
             .background(
-                updater.isUpdateAvailable ? Color.yellow.opacity(0.30)
+                hasUpdate ? Brand.orange.opacity(0.14)
                     : Color.primary.opacity(isHovered ? 0.06 : 0),
                 in: Capsule()
             )
@@ -151,10 +157,11 @@ private struct AppUpdateVersionButton: View {
         .background(AppUpdatePopoverAnchor(presenter: presenter))
         .onHover { isHovered = $0 }
         .help(Text(updater.isUpdateAvailable
-            ? "发现新版本 v\(displayVersion)，当前版本 v\(updater.currentVersion)"
+            ? "发现 YTray 新版本 v\(displayVersion)，当前版本 v\(updater.currentVersion)"
+            : store.isExtensionUpdateAvailable ? "Yakit Browser Agent 有可用更新"
             : "YTray v\(updater.currentVersion) · 查看版本与更新"))
-        .accessibilityLabel(Text(updater.isUpdateAvailable
-            ? "YTray v\(displayVersion) 可更新，当前版本 v\(updater.currentVersion)"
+        .accessibilityLabel(Text(hasUpdate
+            ? "YTray 有可用更新"
             : "YTray 当前版本 v\(updater.currentVersion)"))
         .accessibilityIdentifier("YTray 版本与更新")
     }
@@ -178,21 +185,25 @@ private final class AppUpdatePopoverPresenter: NSObject, ObservableObject, NSPop
 
     func attach(to view: NSView) { anchor = view }
 
-    func toggle() {
+    func toggle(store: InstanceStore) {
         if popover.isShown {
             popover.performClose(nil)
             return
         }
         guard let anchor, anchor.window != nil else { return }
-        let hosting = NSHostingController(rootView: AppUpdatePopover(updater: updater) { [weak self] in
+        let hosting = NSHostingController(rootView: AppUpdatePopover(updater: updater, store: store) { [weak self] in
             self?.popover.performClose(nil)
         })
         hosting.view.layoutSubtreeIfNeeded()
         let fitting = hosting.view.fittingSize
-        popover.contentSize = NSSize(width: 400, height: min(450, max(230, fitting.height)))
+        popover.contentSize = NSSize(width: 420, height: min(650, max(430, fitting.height)))
         popover.contentViewController = hosting
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-        Task { await updater.checkForUpdates() }
+        Task {
+            async let app: Void = updater.checkForUpdates()
+            async let browserAgent: Void = store.refreshExtensionManifest()
+            _ = await (app, browserAgent)
+        }
     }
 
     func popoverShouldClose(_ popover: NSPopover) -> Bool {
@@ -223,6 +234,7 @@ private struct AppUpdatePopoverAnchor: NSViewRepresentable {
 @MainActor
 private struct AppUpdatePopover: View {
     @ObservedObject var updater: AppUpdateManager
+    @ObservedObject var store: InstanceStore
     let dismiss: () -> Void
 
     private var displayVersion: String {
@@ -230,62 +242,193 @@ private struct AppUpdatePopover: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) {
-                Text("YTray v\(displayVersion)")
-                    .font(.system(size: 16, weight: .semibold))
-                if updater.isUpdateAvailable {
-                    Text("新版本")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(Color.orange)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.yellow.opacity(0.30), in: Capsule())
-                }
+        VStack(spacing: 10) {
+            HStack(alignment: .center) {
+                Text("更新通知")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .padding(.bottom, 10)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Brand.orange).frame(height: 2) }
                 Spacer()
-            }
-            Text(updater.statusText)
-                .font(.caption)
-                .foregroundStyle(updater.phase == .failed ? Color.red : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            ScrollView {
-                Text(notes)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 235)
-            Text(updater.lastCheck.map { "上次检查：\($0.formatted())" } ?? "尚未检查更新")
-                .font(.caption2).foregroundStyle(.tertiary)
-            HStack(spacing: 8) {
-                if updater.releaseNotesURL != nil {
-                    Button("查看完整说明") { updater.openReleaseNotes() }
-                }
-                Spacer()
-                Button("手动下载") { updater.openDownloads() }
+                Toggle("自动检测更新", isOn: $updater.automaticallyChecks)
+                    .font(.system(size: 11.5))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .disabled(!updater.updatesEnabled)
-                Button(updater.isUpdateAvailable ? "立即更新" : updater.actionLabel) {
-                    if updater.isUpdateAvailable {
-                        dismiss()
-                        updater.installUpdate()
-                    } else {
-                        Task { await updater.checkForUpdates() }
-                    }
-                }
-                .buttonStyle(ManagerButtonStyle(emphasis: .primary))
-                .disabled(updater.isBusy || !updater.updatesEnabled)
             }
+            .padding(.horizontal, 2)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable().interpolation(.high).frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 7) {
+                            Text("YTray v\(displayVersion)").font(.system(size: 12.5, weight: .semibold))
+                            if updater.isUpdateAvailable { updateBadge }
+                        }
+                        Text(updater.statusText)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(updater.phase == .failed ? Color.red : Color.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button(updater.isUpdateAvailable ? "立即更新" : updater.actionLabel) {
+                        if updater.isUpdateAvailable {
+                            dismiss()
+                            updater.installUpdate()
+                        } else {
+                            Task { await updater.checkForUpdates() }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Brand.orange)
+                    .disabled(updater.isBusy || !updater.updatesEnabled)
+                }
+                .padding(.horizontal, 10).frame(height: 58)
+                .background(Brand.orange.opacity(0.12))
+
+                ScrollView {
+                    Text(notes)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(minHeight: 72, maxHeight: 150)
+
+                Divider().padding(.horizontal, 10)
+                HStack(spacing: 6) {
+                    Text(updater.lastCheck.map { "上次检查：\($0.formatted())" } ?? "尚未检查更新")
+                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                    Spacer()
+                    if updater.releaseNotesURL != nil {
+                        Button("完整说明") { updater.openReleaseNotes() }.buttonStyle(.borderless)
+                    }
+                    Button("手动下载") { updater.openDownloads() }
+                        .buttonStyle(.borderless).disabled(!updater.updatesEnabled)
+                }
+                .padding(.horizontal, 10).frame(height: 38)
+            }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Brand.orange.opacity(0.38)))
+
+            VStack(spacing: 0) {
+                HStack(spacing: 9) {
+                    if let installed = store.managedExtension {
+                        PluginArtwork(plugin: installed).frame(width: 28, height: 28)
+                    } else {
+                        Text("Y").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 28, height: 28).background(Brand.orange, in: Circle())
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 7) {
+                            Text(extensionTitle).font(.system(size: 12.5, weight: .semibold))
+                            if store.isExtensionUpdateAvailable { updateBadge }
+                        }
+                        Text(store.managedExtension.map { "当前版本：v\($0.version)" } ?? "当前未安装")
+                            .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(extensionActionTitle) { Task { await runExtensionAction() } }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Brand.orange)
+                        .disabled(!extensionActionEnabled)
+                }
+                .padding(.horizontal, 10).frame(height: 58)
+                .background(Brand.orange.opacity(0.12))
+
+                Text(extensionNotes)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+                    .padding(10)
+
+                Divider().padding(.horizontal, 10)
+                HStack(spacing: 8) {
+                    if store.isInstallingExtension { ProgressView().controlSize(.small) }
+                    Text(extensionStatus)
+                        .font(.system(size: 9.5)).foregroundStyle(.tertiary).lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 10).frame(height: 38)
+            }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Brand.orange.opacity(0.38)))
         }
-        .padding(16)
-        .frame(width: 400)
+        .padding(12)
+        .frame(width: 420)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("YTray 版本更新弹层")
+    }
+
+    private var updateBadge: some View {
+        Text("新版本")
+            .font(.system(size: 9.5, weight: .medium)).foregroundStyle(Brand.orange)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
     }
 
     private var notes: String {
         if let notes = updater.releaseNotesText, !notes.isEmpty { return notes }
         return updater.isBusy ? "正在获取版本说明…" : "检查更新后可查看当前版本说明。"
+    }
+
+    private var latestExtension: ExtensionReleaseVersion? {
+        store.extensionManifest?.versions.first { ExtensionInstaller.enterpriseArtifact(of: $0) != nil }
+    }
+
+    private var bundledExtensionVersion: String? { ExtensionInstaller.bundledVersion() }
+
+    private var extensionTitle: String {
+        let version = latestExtension?.version ?? bundledExtensionVersion ?? store.managedExtension?.version
+        return version.map { "Yakit Browser Agent v\($0)" } ?? "Yakit Browser Agent"
+    }
+
+    private var extensionActionTitle: String {
+        if store.isInstallingExtension { return "更新中…" }
+        if store.extensionManifest == nil, store.managedExtension != nil { return "检查更新" }
+        if store.managedExtension == nil { return latestExtension != nil ? "立即下载" : "安装内置版" }
+        return store.isExtensionUpdateAvailable ? "立即更新" : "已是最新"
+    }
+
+    private var extensionActionEnabled: Bool {
+        !store.isInstallingExtension && (store.extensionManifest == nil
+            || store.managedExtension == nil && bundledExtensionVersion != nil
+            || store.isExtensionUpdateAvailable)
+    }
+
+    private var extensionNotes: String {
+        if let latestExtension {
+            let notes = (latestExtension.notes ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if !notes.isEmpty {
+                return notes.enumerated().map { "\($0.offset + 1). \($0.element.trimmingCharacters(in: .whitespacesAndNewlines))" }
+                    .joined(separator: "\n")
+            }
+            let commit = latestExtension.commit.isEmpty ? "-" : String(latestExtension.commit.prefix(10))
+            return "发布时间：\(latestExtension.publishedAt)\n构建：\(commit)"
+        }
+        if let bundledExtensionVersion {
+            return "当前安装包内置 Yakit Browser Agent v\(bundledExtensionVersion)。"
+        }
+        return store.extensionManifest == nil
+            ? "打开更新通知后会同时检查浏览器插件版本。"
+            : "当前更新清单中没有可用的企业版扩展包。"
+    }
+
+    private var extensionStatus: String {
+        if !store.extensionStatusMessage.isEmpty { return store.extensionStatusMessage }
+        return store.extensionManifest.map { "更新清单：\($0.updatedAt)" } ?? "尚未检查更新"
+    }
+
+    private func runExtensionAction() async {
+        if store.extensionManifest == nil {
+            await store.refreshExtensionManifest()
+            if store.managedExtension != nil, !store.isExtensionUpdateAvailable { return }
+        }
+        await store.installExtension()
     }
 }
 
@@ -325,6 +468,209 @@ private struct ManagerSidebarRow: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+struct MCPPage: View {
+    @ObservedObject var store: InstanceStore
+    @State private var copied = ""
+
+    private let tools = [
+        ("list_browser_runtimes", "列出可用浏览器运行时", "只读"),
+        ("list_browser_instances", "列出运行中或历史浏览器实例", "只读"),
+        ("open_browser_instance", "打开新的隔离浏览器实例", "操作"),
+        ("focus_browser_instance", "聚焦指定的运行中实例", "操作"),
+        ("stop_browser_instance", "停止实例并保留历史记录", "操作"),
+    ]
+
+    private var configuration: String {
+        """
+        {
+          "servers": {
+            "ytray": {
+              "type": "http",
+              "url": "\(MCPServer.endpoint)"
+            }
+          }
+        }
+        """
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PageHeader(title: "MCP 服务", subtitle: "让 Agent 通过 YTray 安全地控制本机隔离浏览器。")
+
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 19, weight: .medium)).foregroundStyle(Brand.orange)
+                            .frame(width: 42, height: 42)
+                            .background(Brand.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 9) {
+                                Text("YTray Browser MCP").font(.headline)
+                                HStack(spacing: 6) {
+                                    Circle().fill(statusColor).frame(width: 7, height: 7)
+                                    Text(store.isMCPAvailable ? "服务运行中" : "服务已停止")
+                                }
+                                .font(.caption2.weight(.semibold)).foregroundStyle(statusColor)
+                                .padding(.horizontal, 9).frame(height: 22)
+                                .background(statusColor.opacity(0.11), in: Capsule())
+                            }
+                            Text(store.isMCPAvailable ? "正在接受 Agent 连接" : "当前不接受连接")
+                                .font(.caption.weight(.semibold))
+                            Text(store.mcpStatusMessage).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 12)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("MCP 服务").font(.caption.weight(.semibold))
+                            Toggle("", isOn: Binding(
+                                get: { store.isMCPAvailable },
+                                set: { enabled in
+                                    if enabled { _ = store.startMCPService() }
+                                    else { store.stopMCPService() }
+                                }
+                            ))
+                            .labelsHidden().toggleStyle(.switch).tint(Brand.orange)
+                        }
+                        Divider().frame(height: 38)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("自动启动").font(.caption.weight(.semibold))
+                            Toggle("", isOn: Binding(
+                                get: { store.settings.mcpAutoStart },
+                                set: { store.setMCPAutoStart($0) }
+                            ))
+                            .labelsHidden().toggleStyle(.switch).tint(Brand.orange)
+                        }
+                    }
+
+                    HStack(spacing: 9) {
+                        Text("连接地址").font(.caption2).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Text(MCPServer.endpoint).font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled).lineLimit(1)
+                            Spacer()
+                            Button(copied == "endpoint" ? "已复制" : "复制地址") {
+                                copy(MCPServer.endpoint, key: "endpoint")
+                            }
+                            .buttonStyle(ManagerButtonStyle())
+                            .accessibilityLabel("复制 MCP 地址")
+                        }
+                        .padding(.horizontal, 10).frame(height: 34)
+                        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.10)))
+                        MCPMetaLabel(text: "Streamable HTTP")
+                        MCPMetaLabel(text: "仅本机访问")
+                    }
+                }
+                .padding(16)
+
+                Divider()
+
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 11) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("连接配置").font(.headline)
+                            Text("复制配置到客户端，重新连接后即可发现工具。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 18) {
+                            MCPGuideStep(number: 1, text: "添加服务")
+                            MCPGuideStep(number: 2, text: "粘贴配置")
+                            MCPGuideStep(number: 3, text: "刷新连接")
+                        }
+                        HStack {
+                            Text("VS Code · mcp.json").font(.caption.weight(.semibold))
+                            Spacer()
+                            Button(copied == "config" ? "已复制" : "复制配置") {
+                                copy(configuration, key: "config")
+                            }
+                            .buttonStyle(ManagerButtonStyle())
+                        }
+                        Text(configuration).font(.system(size: 10.5, design: .monospaced))
+                            .textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .padding(11)
+                            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.10)))
+                    }
+                    .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("可用工具").font(.headline)
+                                Text("Agent 连接后自动发现，无需单独安装插件。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("5 个工具").font(.caption2.weight(.medium)).foregroundStyle(Brand.orange)
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Brand.orange.opacity(0.11), in: Capsule())
+                        }
+                        .padding(.bottom, 8)
+                        ForEach(Array(tools.enumerated()), id: \.offset) { index, tool in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(tool.0).font(.system(.caption, design: .monospaced)).lineLimit(1)
+                                    Text(tool.1).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Text(tool.2).font(.caption2.weight(.medium))
+                                    .foregroundStyle(tool.2 == "只读" ? Color.secondary : Brand.orange)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background((tool.2 == "只读" ? Color.primary : Brand.orange).opacity(0.08), in: Capsule())
+                            }
+                            .padding(.vertical, 7)
+                            if index < tools.count - 1 { Divider() }
+                        }
+                    }
+                    .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .frame(height: 328)
+            }
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.10)))
+
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+    }
+
+    private var statusColor: Color {
+        store.isMCPAvailable ? .green : store.mcpStatusMessage.hasPrefix("启动失败") ? .red : .secondary
+    }
+
+    private func copy(_ value: String, key: String) {
+        NSPasteboard.general.clearContents()
+        copied = NSPasteboard.general.setString(value, forType: .string) ? key : ""
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if copied == key { copied = "" }
+        }
+    }
+}
+
+private struct MCPMetaLabel: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.caption2).foregroundStyle(.secondary)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.primary.opacity(0.04), in: Capsule())
+            .overlay(Capsule().stroke(Color.primary.opacity(0.09)))
+    }
+}
+
+private struct MCPGuideStep: View {
+    let number: Int
+    let text: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("\(number)").font(.caption2.weight(.semibold)).foregroundStyle(Brand.orange)
+                .frame(width: 19, height: 19).background(Brand.orange.opacity(0.12), in: Circle())
+            Text(text).font(.caption)
+        }
     }
 }
 
@@ -758,7 +1104,6 @@ private struct RuntimeArtwork: View {
 @MainActor
 struct SettingsPage: View {
     @ObservedObject var store: InstanceStore
-    @ObservedObject private var updater = AppUpdateManager.shared
     let quitApplication: () -> Void
 
     var body: some View {
@@ -773,8 +1118,6 @@ struct SettingsPage: View {
                     Button("保存设置") { store.saveSettings() }
                         .buttonStyle(ManagerButtonStyle(emphasis: .primary))
                 }
-
-                updatePreferencesPanel
 
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: ManagerMetrics.sectionSpacing) {
@@ -815,22 +1158,6 @@ struct SettingsPage: View {
             .padding(4)
         } label: {
             Label("Chrome 高级参数", systemImage: "terminal")
-        }
-    }
-
-    private var updatePreferencesPanel: some View {
-        GroupBox {
-            HStack(spacing: 12) {
-                Toggle("自动检查新版本", isOn: $updater.automaticallyChecks)
-                    .toggleStyle(.checkbox)
-                    .disabled(!updater.updatesEnabled)
-                Spacer()
-                Text("后台定期检查，不会自动下载或安装。版本与更新说明可在窗口顶部查看。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(4)
-        } label: {
-            Label("应用更新", systemImage: "arrow.down.circle")
         }
     }
 
@@ -883,6 +1210,12 @@ struct SettingsPage: View {
     private var browserBehaviorPanel: some View {
         GroupBox {
             VStack(spacing: 0) {
+                settingToggle(
+                    "启动后自动连接 Yakit",
+                    detail: "仅自动批准当前 YTray 启动或恢复的实例",
+                    isOn: $store.settings.autoConnectYakit
+                )
+                Divider()
                 settingToggle(
                     "限制 WebRTC 本地 IP 暴露",
                     detail: "禁止非代理 UDP 连接",
@@ -1074,7 +1407,6 @@ struct PluginsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ManagerMetrics.sectionSpacing) {
             PageHeader(title: "插件管理", subtitle: "可分别设置默认加载和工具栏固定；修改将在下次启动实例时生效。")
-            yakitExtensionSection
             HStack {
                 Label("本地插件 · \(store.plugins.count)", systemImage: "puzzlepiece.extension")
                     .font(.callout.weight(.semibold))
@@ -1153,7 +1485,6 @@ struct PluginsPage: View {
                 }
             }
         }.padding(ManagerMetrics.pagePadding)
-        .task { if store.extensionManifest == nil { await store.refreshExtensionManifest() } }
     }
 
     private var sortedPlugins: [BrowserPlugin] {
@@ -1164,63 +1495,6 @@ struct PluginsPage: View {
             if leftIsManaged != rightIsManaged { return leftIsManaged }
             return left.createdAt < right.createdAt
         }
-    }
-
-    private var latestEnterpriseVersion: ExtensionReleaseVersion? {
-        store.extensionManifest?.versions.first { ExtensionInstaller.enterpriseArtifact(of: $0) != nil }
-    }
-
-    private var bundledExtensionVersion: String? {
-        ExtensionInstaller.bundledVersion()
-    }
-
-    private var yakitExtensionSection: some View {
-        let installed = store.managedExtension
-        let latest = latestEnterpriseVersion
-        let bundled = bundledExtensionVersion
-        let busy = store.isInstallingExtension
-        let needsInstall = installed == nil || store.isExtensionUpdateAvailable
-        let buttonTitle = busy ? "安装中…"
-            : installed == nil ? (latest.map { "下载 Yakit 插件 v\($0.version)" }
-                ?? bundled.map { "安装内置版本 v\($0)" }
-                ?? "下载 Yakit 插件")
-            : store.isExtensionUpdateAvailable && latest != nil ? "更新到 v\(latest!.version)"
-            : latest != nil ? "重新下载" : bundled != nil ? "重新安装内置版本" : "重新下载"
-        return HStack(spacing: 12) {
-            if busy {
-                ProgressView().controlSize(.small).tint(Brand.orange)
-            } else {
-                Image(systemName: needsInstall ? "arrow.down.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(needsInstall ? Brand.orange : Color.green)
-                    .font(.title2)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                if let installed, store.extensionManifest != nil, !store.isExtensionUpdateAvailable {
-                    Text("Yakit 浏览器插件 v\(installed.version) 已是最新").font(.callout)
-                } else if let installed, store.isExtensionUpdateAvailable {
-                    Text("当前 v\(installed.version) · 最新 v\(latest?.version ?? store.extensionManifest?.latest ?? "")").font(.callout)
-                } else if let latest {
-                    Text("Yakit 浏览器插件 v\(latest.version) 可下载").font(.callout)
-                } else if let bundled {
-                    Text("安装包内置 Yakit 浏览器插件 v\(bundled)").font(.callout)
-                } else {
-                    Text("Yakit 浏览器插件").font(.callout)
-                }
-                if !store.extensionStatusMessage.isEmpty {
-                    Text(store.extensionStatusMessage).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Button("检查更新") { Task { await store.refreshExtensionManifest() } }
-                .disabled(busy)
-            Button(buttonTitle) { Task { await store.installExtension() } }
-                .buttonStyle(ManagerButtonStyle(emphasis: .primary))
-                .disabled(busy || latest == nil && bundled == nil)
-        }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 58)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.10)))
     }
 
     private func choosePlugin() {

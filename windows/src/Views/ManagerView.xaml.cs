@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -71,7 +72,11 @@ namespace YTray.Views
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 _sidebarRefreshScheduled = false;
-                if (IsLoaded) RefreshStatusBar();
+                if (IsLoaded)
+                {
+                    RefreshStatusBar();
+                    RefreshUpdateControls();
+                }
             }), DispatcherPriority.Background);
         }
 
@@ -91,20 +96,23 @@ namespace YTray.Views
         private void RefreshUpdateControls()
         {
             if (VersionButton == null) return;
-            var available = _updater.IsUpdateAvailable;
-            var version = available ? _updater.AvailableVersion! : _updater.CurrentVersion;
+            var appAvailable = _updater.IsUpdateAvailable;
+            var extensionAvailable = _store.IsExtensionUpdateAvailable;
+            var available = appAvailable || extensionAvailable;
+            var version = appAvailable ? _updater.AvailableVersion! : _updater.CurrentVersion;
             VersionButtonText.Text = "v" + version;
             VersionButton.Tag = available ? "Available" : "Current";
             VersionUpdateDot.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
-            VersionButton.ToolTip = available
-                ? $"发现新版本 v{version}，当前版本 v{_updater.CurrentVersion}"
+            VersionButton.ToolTip = appAvailable
+                ? $"发现 YTray 新版本 v{version}，当前版本 v{_updater.CurrentVersion}"
+                : extensionAvailable ? "Yakit Browser Agent 有可用更新"
                 : $"YTray v{_updater.CurrentVersion} · 查看版本与更新";
             AutomationProperties.SetName(VersionButton, available
-                ? $"YTray v{version} 可更新，当前版本 v{_updater.CurrentVersion}"
+                ? "YTray 有可用更新"
                 : $"YTray 当前版本 v{_updater.CurrentVersion}");
 
             UpdatePopupTitle.Text = "YTray v" + version;
-            UpdatePopupBadge.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+            UpdatePopupBadge.Visibility = appAvailable ? Visibility.Visible : Visibility.Collapsed;
             UpdatePopupStatus.Text = _updater.StatusText;
             UpdatePopupStatus.SetResourceReference(ForegroundProperty,
                 _updater.Phase == AppUpdatePhase.Failed ? "DangerBrush" : "TextSecondaryBrush");
@@ -116,8 +124,59 @@ namespace YTray.Views
             UpdateReleaseNotesButton.Visibility = string.IsNullOrWhiteSpace(_updater.ReleaseNotesUrl)
                 ? Visibility.Collapsed : Visibility.Visible;
             UpdateDownloadButton.IsEnabled = _updater.Enabled;
-            UpdateActionButton.Content = available ? "立即更新" : _updater.ActionLabel;
+            UpdateActionButton.Content = appAvailable ? "立即更新" : _updater.ActionLabel;
             UpdateActionButton.IsEnabled = _updater.Enabled && !_updater.IsBusy;
+            UpdateAutoCheck.IsChecked = _store.Settings.CheckForAppUpdates;
+
+            var installed = _store.ManagedExtension;
+            var latest = _store.ExtensionManifest?.Versions.FirstOrDefault(candidate =>
+                ExtensionInstaller.EnterpriseArtifact(candidate) != null);
+            var hasBundled = ExtensionInstaller.TryGetBundledVersion(out var bundledVersion);
+            var targetVersion = latest?.Version ?? (hasBundled ? bundledVersion : installed?.Version ?? "");
+            ExtensionPopupTitle.Text = string.IsNullOrWhiteSpace(targetVersion)
+                ? "Yakit Browser Agent"
+                : "Yakit Browser Agent v" + targetVersion;
+            ExtensionPopupBadge.Visibility = extensionAvailable ? Visibility.Visible : Visibility.Collapsed;
+            ExtensionPopupVersion.Text = installed == null
+                ? "当前未安装"
+                : "当前版本: v" + installed.Version;
+
+            if (latest != null)
+            {
+                var notes = (latest.Notes ?? new List<string>())
+                    .Where(note => !string.IsNullOrWhiteSpace(note)).ToList();
+                if (notes.Count > 0)
+                    ExtensionPopupNotes.Text = string.Join("\n", notes.Select((note, index) => $"{index + 1}. {note.Trim()}"));
+                else
+                {
+                    var published = DateTime.TryParse(latest.PublishedAt, out var date)
+                        ? date.ToLocalTime().ToString("yyyy/M/d HH:mm") : latest.PublishedAt;
+                    var commit = string.IsNullOrWhiteSpace(latest.Commit) ? "-"
+                        : latest.Commit.Substring(0, Math.Min(10, latest.Commit.Length));
+                    ExtensionPopupNotes.Text = $"发布时间：{published}\n构建：{commit}";
+                }
+            }
+            else if (hasBundled)
+                ExtensionPopupNotes.Text = $"当前安装包内置 Yakit Browser Agent v{bundledVersion}。";
+            else
+                ExtensionPopupNotes.Text = _store.ExtensionManifest == null
+                    ? "打开更新通知后会同时检查浏览器插件版本。"
+                    : "当前更新清单中没有可用的企业版扩展包。";
+
+            var extensionBusy = _store.IsInstallingExtension;
+            if (extensionBusy) ExtensionActionButton.Content = $"更新中 {_store.ExtensionInstallPercent}%";
+            else if (_store.ExtensionManifest == null && installed != null) ExtensionActionButton.Content = "检查更新";
+            else if (installed == null) ExtensionActionButton.Content = latest != null ? "立即下载" : "安装内置版";
+            else if (extensionAvailable) ExtensionActionButton.Content = "立即更新";
+            else ExtensionActionButton.Content = "已是最新";
+            ExtensionActionButton.IsEnabled = !extensionBusy && (
+                _store.ExtensionManifest == null || installed == null && hasBundled || extensionAvailable);
+            ExtensionPopupProgress.Visibility = extensionBusy ? Visibility.Visible : Visibility.Collapsed;
+            ExtensionPopupProgress.Value = _store.ExtensionInstallPercent;
+            ExtensionPopupStatus.Text = !string.IsNullOrWhiteSpace(_store.ExtensionStatusMessage)
+                ? _store.ExtensionStatusMessage
+                : _store.ExtensionManifest == null ? "尚未检查更新"
+                : "更新清单：" + _store.ExtensionManifest.UpdatedAt;
         }
 
         private void RefreshStatusBar()
@@ -181,7 +240,11 @@ namespace YTray.Views
         private async void VersionButton_Click(object sender, RoutedEventArgs e)
         {
             UpdatePopup.IsOpen = !UpdatePopup.IsOpen;
-            if (UpdatePopup.IsOpen) await _updater.CheckAsync();
+            if (!UpdatePopup.IsOpen) return;
+            RefreshUpdateControls();
+            await System.Threading.Tasks.Task.WhenAll(
+                _updater.CheckAsync(), _store.RefreshExtensionManifestAsync());
+            RefreshUpdateControls();
         }
 
         private async void UpdateAction_Click(object sender, RoutedEventArgs e)
@@ -198,6 +261,23 @@ namespace YTray.Views
         private void DownloadUpdate_Click(object sender, RoutedEventArgs e) => _updater.OpenDownloads();
 
         private void OpenReleaseNotes_Click(object sender, RoutedEventArgs e) => _updater.OpenReleaseNotes();
+
+        private void UpdateAutoCheck_Click(object sender, RoutedEventArgs e)
+        {
+            _store.Settings.CheckForAppUpdates = UpdateAutoCheck.IsChecked == true;
+            _store.SaveSettings();
+        }
+
+        private async void ExtensionAction_Click(object sender, RoutedEventArgs e)
+        {
+            if (_store.IsInstallingExtension) return;
+            if (_store.ExtensionManifest == null)
+            {
+                await _store.RefreshExtensionManifestAsync();
+                if (_store.ManagedExtension != null && !_store.IsExtensionUpdateAvailable) return;
+            }
+            await _store.InstallExtensionAsync();
+        }
 
         private void Nav_Selected(object sender, RoutedEventArgs e)
         {
@@ -218,6 +298,7 @@ namespace YTray.Views
                     case "instances": page = new InstancesPage(_store); break;
                     case "launch": page = new ProxyLaunchPage(_store); break;
                     case "plugins": page = new PluginsPage(_store); break;
+                    case "mcp": page = new McpPage(_store); break;
                     case "startup": page = new StartupPage(_launchAtLogin); break;
                     default: page = new QuickLaunchPage(_store); tag = "overview"; break;
                 }
@@ -233,6 +314,8 @@ namespace YTray.Views
                 NavSettings.IsSelected = true;
             else if (string.Equals(tag, "plugins", StringComparison.OrdinalIgnoreCase))
                 NavPlugins.IsSelected = true;
+            else if (string.Equals(tag, "mcp", StringComparison.OrdinalIgnoreCase))
+                NavMcp.IsSelected = true;
             else if (string.Equals(tag, "runtimes", StringComparison.OrdinalIgnoreCase))
                 NavRuntimes.IsSelected = true;
             ShowPage(tag);

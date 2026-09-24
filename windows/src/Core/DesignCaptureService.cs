@@ -242,6 +242,7 @@ namespace YTray.Core
                 new MainPageCapture { Slug = "browser-sources", Caption = "浏览器来源", Select = w => w.NavRuntimes },
                 new MainPageCapture { Slug = "proxy-and-launch", Caption = "代理与启动", Select = w => w.NavLaunch },
                 new MainPageCapture { Slug = "plugins", Caption = "本地插件", Select = w => w.NavPlugins },
+                new MainPageCapture { Slug = "mcp", Caption = "MCP", Select = w => w.NavMcp },
                 new MainPageCapture { Slug = "startup", Caption = "开机启动", Select = w => w.NavStartup },
                 new MainPageCapture { Slug = "settings", Caption = "设置", Select = w => w.NavSettings },
             };
@@ -328,6 +329,13 @@ namespace YTray.Core
                 CaptureScreen(WindowBounds(manager), Path.Combine(root, popupRelative));
                 captures.Add(new CaptureItem { RelativePath = popupRelative, Caption = $"标题栏主题菜单 · {ThemeCaption(theme)}" });
                 manager.ThemePopup.IsOpen = false;
+
+                manager.UpdatePopup.IsOpen = true;
+                await SettleAsync(manager, 300);
+                popupRelative = $"main/{themeName}-update-center.png";
+                CaptureWpfElement((FrameworkElement)manager.UpdatePopup.Child, Path.Combine(root, popupRelative));
+                captures.Add(new CaptureItem { RelativePath = popupRelative, Caption = $"标题栏更新通知 · {ThemeCaption(theme)}" });
+                manager.UpdatePopup.IsOpen = false;
             }
 
             manager.Close();
@@ -700,6 +708,21 @@ namespace YTray.Core
                 CrashGuard.Record("design-capture-wpf-visual", ex);
                 return false;
             }
+        }
+
+        private static void CaptureWpfElement(FrameworkElement element, string outputPath)
+        {
+            element.UpdateLayout();
+            var dpi = VisualTreeHelper.GetDpi(element);
+            var bitmap = new RenderTargetBitmap(
+                Math.Max(1, (int)Math.Round(element.ActualWidth * dpi.DpiScaleX)),
+                Math.Max(1, (int)Math.Round(element.ActualHeight * dpi.DpiScaleY)),
+                96d * dpi.DpiScaleX, 96d * dpi.DpiScaleY, PixelFormats.Pbgra32);
+            bitmap.Render(element);
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using (var stream = File.Create(outputPath)) encoder.Save(stream);
         }
 
         private static bool IsNearlyBlack(Drawing.Bitmap bitmap)

@@ -248,9 +248,11 @@ struct LaunchSettings: Codable, Equatable {
     var ignoreCertificateErrors = true
     var useTestType = true
     var colorizeBrowserInstances = true
+    var autoConnectYakit = true
     var additionalFlags = ""
     var defaultPluginIDs: [UUID] = []
     var dockBadge = ""
+    var mcpAutoStart = true
 
     static let blockedCustomPrefixes = [
         "--user-data-dir", "--remote-debugging-address", "--remote-debugging-port",
@@ -266,8 +268,9 @@ struct LaunchSettings: Codable, Equatable {
         case presetProxyUsername, presetProxyPassword, presetProxyRemark, presetProxyCheckTarget
         case recentProxyPresets
         case debugPort, restrictWebRTC
-        case disableNotifications, ignoreCertificateErrors, useTestType, colorizeBrowserInstances, additionalFlags
-        case defaultPluginIDs, dockBadge
+        case disableNotifications, ignoreCertificateErrors, useTestType, colorizeBrowserInstances, autoConnectYakit
+        case additionalFlags
+        case defaultPluginIDs, dockBadge, mcpAutoStart
     }
 }
 
@@ -315,9 +318,11 @@ extension LaunchSettings {
             Bool.self,
             forKey: .colorizeBrowserInstances
         ) ?? true
+        autoConnectYakit = try container.decodeIfPresent(Bool.self, forKey: .autoConnectYakit) ?? true
         additionalFlags = try container.decodeIfPresent(String.self, forKey: .additionalFlags) ?? ""
         defaultPluginIDs = try container.decodeIfPresent([UUID].self, forKey: .defaultPluginIDs) ?? []
         dockBadge = try container.decodeIfPresent(String.self, forKey: .dockBadge) ?? ""
+        mcpAutoStart = try container.decodeIfPresent(Bool.self, forKey: .mcpAutoStart) ?? true
     }
 }
 
@@ -423,11 +428,12 @@ struct ExtensionManifest: Decodable {
 
 struct ExtensionReleaseVersion: Decodable, Identifiable {
     let version: String
+    let notes: [String]?
     let publishedAt: String
     let commit: String
     let artifacts: [ExtensionArtifact]
     enum CodingKeys: String, CodingKey {
-        case version, commit, artifacts
+        case version, notes, commit, artifacts
         case publishedAt = "published_at"
     }
     var id: String { version }

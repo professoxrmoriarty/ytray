@@ -92,6 +92,7 @@ namespace YTray.Core
         private bool _disposed;
         internal Func<bool> CanInstall { get; set; } = () => false;
         internal Func<bool> AutomaticChecks { get; set; } = () => true;
+        internal Func<Task> AutomaticCheckCompanion { get; set; } = () => Task.CompletedTask;
         internal bool Enabled => _enabled;
         internal DateTime? LastCheck { get; private set; }
         internal string? ReleaseNotesText => _release?.ReleaseNotesText;
@@ -233,7 +234,11 @@ namespace YTray.Core
             _timer.Tick += async (sender, args) =>
             {
                 _timer.Interval = TimeSpan.FromHours(6);
-                if (AutomaticChecks()) await CheckAsync();
+                if (AutomaticChecks())
+                {
+                    await CheckAsync();
+                    await AutomaticCheckCompanion();
+                }
             };
             _timer.Start();
         }

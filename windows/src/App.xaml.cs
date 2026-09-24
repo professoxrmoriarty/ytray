@@ -19,6 +19,7 @@ namespace YTray
         private InstanceStore? _store;
         private TrayApp? _tray;
         private LaunchAtLoginManager? _launchAtLogin;
+        private NativeControlServer? _nativeControl;
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -105,6 +106,8 @@ namespace YTray
             }
             _store = new InstanceStore();
             _store.ConfirmLaunchWithoutPlugins = Views.ExtensionLaunchDialog.Confirm;
+            _nativeControl = new NativeControlServer(_store);
+            _nativeControl.Start();
             var initialTheme = _store.Settings.ThemePreference;
             // Non-persistent rendering override used by visual smoke tests and support diagnostics.
             foreach (var arg in e.Args)
@@ -147,6 +150,8 @@ namespace YTray
             }
             // A login launch stays in the tray. A normal launch opens the manager immediately.
             if (!startupLaunch) _tray.ShowManager();
+            if (_store.Settings.McpAutoStart) _store.StartMcpService();
+            else _store.SetMcpStatus(false, "自动启动已关闭，可在 MCP 页面手动启动");
         }
 
         private static void VerifyStandalone(string markerPath)
@@ -237,6 +242,7 @@ namespace YTray
         protected override void OnExit(ExitEventArgs e)
         {
             DiagnosticLog.Info("app.exit", $"application exiting; code={e.ApplicationExitCode}");
+            _nativeControl?.Dispose();
             _tray?.Dispose();
             _launchAtLogin = null;
             _store?.Dispose();

@@ -68,6 +68,7 @@ final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
     let currentVersion: String
     let updatesEnabled: Bool
     var canInstall: () -> Bool = { true }
+    var automaticCheckCompanion: () async -> Void = {}
     private let defaults: UserDefaults
     private var controller: SPUStandardUpdaterController?
     private var timer: Task<Void, Never>?
@@ -101,7 +102,10 @@ final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
             do {
                 try await Task.sleep(for: .seconds(15))
                 while !Task.isCancelled {
-                    if self?.automaticallyChecks == true { await self?.checkForUpdates() }
+                    if self?.automaticallyChecks == true {
+                        await self?.checkForUpdates()
+                        if let companion = self?.automaticCheckCompanion { await companion() }
+                    }
                     try await Task.sleep(for: .seconds(6 * 60 * 60))
                 }
             } catch { /* Cancellation ends the quiet check timer. */ }

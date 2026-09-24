@@ -121,6 +121,7 @@ namespace YTray.Core
                 $"--remote-allow-origins=http://127.0.0.1:{debugPort}",
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--hide-crash-restore-bubble",
             };
 
             // Only initialize brand-new profiles. A restored profile may have a user-selected

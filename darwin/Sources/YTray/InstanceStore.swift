@@ -26,6 +26,8 @@ final class InstanceStore: NSObject, ObservableObject {
     @Published private(set) var proxyCheckMessage = ""
     @Published private(set) var proxyCheckReport: ProxyCheckReport?
     @Published var isProxyAdvancedExpanded = false
+    @Published private(set) var isMCPAvailable = false
+    @Published private(set) var mcpStatusMessage = "等待 MCP 服务启动"
 
     let applicationDirectory: URL
     var confirmLaunchWithoutPlugins: (ExtensionLaunchPrompt) -> Bool = { $0.present() }
@@ -40,13 +42,63 @@ final class InstanceStore: NSObject, ObservableObject {
     private var launchToken: UUID?
     private var launchingInstanceID: UUID?
     private var proxyCheckToken: UUID?
+    private var yakitLaunchApprovals: [UUID: YakitLaunchApproval] = [:]
+    private lazy var mcpServer = MCPServer(store: self)
 
     private static let thumbnailRefreshInterval: TimeInterval = 12
+    private static let yakitLaunchApprovalLifetime: TimeInterval = 120
     private static var applicationDirectoryName: String { AppEnvironment.applicationDirectoryName }
     private static let legacyApplicationDirectoryName = ["Instance", "Dock"].joined()
 
     var isLaunching: Bool {
         launchPhase == .preparing || launchPhase == .waiting
+    }
+
+    func setMCPStatus(available: Bool, message: String) {
+        isMCPAvailable = available
+        mcpStatusMessage = message
+    }
+
+    func startMCPService() -> Bool { mcpServer.start() }
+
+    func stopMCPService() { mcpServer.stop() }
+
+    func setMCPAutoStart(_ enabled: Bool) {
+        guard settings.mcpAutoStart != enabled else { return }
+        settings.mcpAutoStart = enabled
+        saveSettings()
+    }
+
+    func rememberYakitLaunch(_ instanceID: UUID, now: Date = Date()) {
+        guard settings.autoConnectYakit else { return }
+        yakitLaunchApprovals[instanceID] = YakitLaunchApproval(
+            expiresAt: now.addingTimeInterval(Self.yakitLaunchApprovalLifetime)
+        )
+    }
+
+    func claimYakitLaunch(_ instanceID: UUID, requestID: String, now: Date = Date())
+        -> (approved: Bool, reason: String) {
+        guard settings.autoConnectYakit else { return (false, "disabled") }
+        guard var approval = yakitLaunchApprovals[instanceID] else { return (false, "not_found") }
+        guard now <= approval.expiresAt else {
+            yakitLaunchApprovals[instanceID] = nil
+            return (false, "expired")
+        }
+        guard instances.contains(where: { $0.id == instanceID && $0.status == .running }) else {
+            yakitLaunchApprovals[instanceID] = nil
+            return (false, "not_running")
+        }
+        if approval.requestID == nil {
+            approval.requestID = requestID
+            yakitLaunchApprovals[instanceID] = approval
+            return (true, "")
+        }
+        return approval.requestID == requestID ? (true, "") : (false, "already_claimed")
+    }
+
+    private struct YakitLaunchApproval {
+        let expiresAt: Date
+        var requestID: String?
     }
 
     init(
@@ -206,7 +258,7 @@ final class InstanceStore: NSObject, ObservableObject {
     var isExtensionUpdateAvailable: Bool {
         guard let manifest = extensionManifest else { return false }
         let latest = manifest.versions.first { ExtensionInstaller.enterpriseArtifact(of: $0) != nil }
-            ?? ExtensionReleaseVersion(version: manifest.latest, publishedAt: "", commit: "", artifacts: [])
+            ?? ExtensionReleaseVersion(version: manifest.latest, notes: nil, publishedAt: "", commit: "", artifacts: [])
         guard ExtensionInstaller.enterpriseArtifact(of: latest) != nil else { return false }
         guard let installed = managedExtension else { return true }
         return ExtensionInstaller.compareVersions(latest.version, installed.version) == .orderedDescending
@@ -552,6 +604,7 @@ final class InstanceStore: NSObject, ObservableObject {
                 instances.removeAll { $0.id == history.id }
             }
             instances.insert(result.instance, at: 0)
+            rememberYakitLaunch(result.instance.id)
             save()
             launchingInstanceID = result.instance.id
             launchMessage = "正在启动 \(runtime.displayTitle)…"
@@ -838,7 +891,10 @@ final class InstanceStore: NSObject, ObservableObject {
         NSRunningApplication(processIdentifier: instance.processID)?.activate(options: [.activateAllWindows])
     }
 
-    func saveSettings() { save() }
+    func saveSettings() {
+        if !settings.autoConnectYakit { yakitLaunchApprovals.removeAll() }
+        save()
+    }
 
     var defaultProfileRoot: URL {
         applicationDirectory.appendingPathComponent("Profiles", isDirectory: true).standardizedFileURL
@@ -976,6 +1032,7 @@ final class InstanceStore: NSObject, ObservableObject {
                     "browser process is no longer running; instance=\(instances[index].id.uuidString); pid=\(pid)"
                 )
                 instances[index].status = .stopped
+                yakitLaunchApprovals[instances[index].id] = nil
                 BrowserProcessIcon.remove(
                     instanceID: instances[index].id,
                     applicationDirectory: applicationDirectory
@@ -1006,6 +1063,7 @@ final class InstanceStore: NSObject, ObservableObject {
     }
 
     private func markStopped(_ id: UUID) {
+        yakitLaunchApprovals[id] = nil
         processes[id] = nil
         BrowserProcessIcon.remove(instanceID: id, applicationDirectory: applicationDirectory)
         ProxyAuthenticationExtension.remove(instanceID: id, applicationDirectory: applicationDirectory)
@@ -1289,6 +1347,7 @@ final class InstanceStore: NSObject, ObservableObject {
         BrowserProcessIcon.remove(instanceID: instance.id, applicationDirectory: applicationDirectory)
         ProxyAuthenticationExtension.remove(instanceID: instance.id, applicationDirectory: applicationDirectory)
         instances.removeAll { $0.id == instance.id }
+        yakitLaunchApprovals[instance.id] = nil
         if let history { instances.insert(history, at: 0) }
         else {
             let ownedProfile = BrowserLauncher.newProfileURL(

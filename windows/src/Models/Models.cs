@@ -307,6 +307,7 @@ namespace YTray.Models
         public bool IgnoreCertificateErrors { get; set; } = true;
         public bool UseTestType { get; set; } = true;
         public bool ColorizeBrowserInstances { get; set; } = true;
+        public bool AutoConnectYakit { get; set; } = true;
         public string AdditionalFlags { get; set; } = "";
         public string ProfileRootPath { get; set; } = "";
         public List<Guid> DefaultPluginIDs { get; set; } = new List<Guid>();
@@ -316,6 +317,7 @@ namespace YTray.Models
         public int EdgeDockYPercent { get; set; } = 58;
         public AppThemePreference ThemePreference { get; set; } = AppThemePreference.System;
         public bool LaunchAtLoginSetupCompleted { get; set; }
+        public bool McpAutoStart { get; set; } = true;
 
         public static readonly string[] BlockedCustomPrefixes =
         {
@@ -369,6 +371,7 @@ namespace YTray.Models
                 IgnoreCertificateErrors = IgnoreCertificateErrors,
                 UseTestType = UseTestType,
                 ColorizeBrowserInstances = ColorizeBrowserInstances,
+                AutoConnectYakit = AutoConnectYakit,
                 AdditionalFlags = AdditionalFlags ?? "",
                 ProfileRootPath = ProfileRootPath ?? "",
                 DefaultPluginIDs = (DefaultPluginIDs ?? new List<Guid>()).ToList(),
@@ -378,6 +381,7 @@ namespace YTray.Models
                 EdgeDockYPercent = EdgeDockYPercent,
                 ThemePreference = ThemePreference,
                 LaunchAtLoginSetupCompleted = LaunchAtLoginSetupCompleted,
+                McpAutoStart = McpAutoStart,
                 CheckForAppUpdates = CheckForAppUpdates,
             };
         }
@@ -551,6 +555,7 @@ namespace YTray.Models
     public class ExtensionReleaseVersion
     {
         public string Version { get; set; } = "";
+        public List<string> Notes { get; set; } = new List<string>();
         [JsonProperty("published_at")]
         public string PublishedAt { get; set; } = "";
         public string Commit { get; set; } = "";

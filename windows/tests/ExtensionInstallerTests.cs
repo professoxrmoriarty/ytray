@@ -18,6 +18,7 @@ namespace YTray.Tests
   ""versions"": [
     {
       ""version"": ""0.2.2"",
+      ""notes"": [""增加真实版本说明展示。""],
       ""published_at"": ""2026-08-18T07:00:17.374Z"",
       ""commit"": ""b00073480050437d1ed16784b9721f5a6323baf3"",
       ""artifacts"": [
@@ -55,6 +56,7 @@ namespace YTray.Tests
             Assert.AreEqual(1, manifest.Versions.Count);
             var version = manifest.Versions[0];
             Assert.AreEqual("0.2.2", version.Version);
+            Assert.AreEqual("增加真实版本说明展示。", version.Notes.Single());
             Assert.AreEqual("b00073480050437d1ed16784b9721f5a6323baf3", version.Commit);
             Assert.AreEqual(2, version.Artifacts.Count);
             var enterprise = ExtensionInstaller.EnterpriseArtifact(version);

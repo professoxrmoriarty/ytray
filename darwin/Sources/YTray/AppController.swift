@@ -13,6 +13,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let store = InstanceStore()
     private let launchAtLogin = LaunchAtLoginManager()
     private let appUpdater = AppUpdateManager.shared
+    private lazy var nativeControl = NativeControlServer(store: store)
     private lazy var edgeDock = YTrayEdgeDockController(store: store) { [weak self] anchor, onLeft in
         self?.showWidgetFromEdge(anchor: anchor, onLeft: onLeft)
     }
@@ -54,7 +55,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return !self.store.isLaunching && !self.store.isInstalling && !self.store.isInstallingExtension
                 && NSApp.modalWindow == nil && NSApp.windows.allSatisfy { $0.attachedSheet == nil }
         }
+        appUpdater.automaticCheckCompanion = { [weak self] in
+            await self?.store.refreshExtensionManifest()
+        }
         appUpdater.start()
+        nativeControl.start()
+        if store.settings.mcpAutoStart {
+            _ = store.startMCPService()
+        } else {
+            store.setMCPStatus(available: false, message: "自动启动已关闭，可在 MCP 页面手动启动")
+        }
         DiagnosticLog.info("app.ready", "startup completed; foreground=\(presentsManager)")
         if CommandLine.arguments.contains("--smoke-reopen") { runReopenSmoke() }
     }
@@ -97,6 +107,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationWillTerminate(_ notification: Notification) {
+        nativeControl.stop()
+        store.stopMCPService()
         appUpdater.stop()
         DiagnosticLog.info("app.exit", "application will terminate")
     }
