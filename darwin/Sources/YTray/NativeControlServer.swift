@@ -17,7 +17,7 @@ final class NativeControlServer {
     func start() {
         guard descriptor < 0 else { return }
         let path = socketURL.path
-        let pathBytes = Array(path.utf8CString)
+        let pathBytes = Array(path.utf8) + [UInt8(0)]
         var address = sockaddr_un()
         guard pathBytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
             DiagnosticLog.error("native-control", NSError(domain: "YTray", code: 1,
@@ -30,7 +30,7 @@ final class NativeControlServer {
         unlink(path)
         address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
         address.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+        withUnsafeMutableBytes(of: &address.sun_path) { (buffer: UnsafeMutableRawBufferPointer) in
             buffer.copyBytes(from: pathBytes)
         }
         let bound = withUnsafePointer(to: &address) {
