@@ -1,4 +1,4 @@
-name: "Release (English Edition)"
+name: "2. Build & Release YTray (English Edition)"
 
 on:
   workflow_call:
