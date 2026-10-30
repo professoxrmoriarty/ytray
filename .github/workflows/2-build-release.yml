@@ -1,0 +1,104 @@
+name: "2. Build & Release YTray (English Edition)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag အမည် (ဥပမာ v2026.10.30-ytray-en)'
+        required: false
+        default: ''
+      target_ref:
+        description: 'Build လုပ်မည့် Branch (ပုံမှန် english-edition)'
+        required: false
+        default: 'english-edition'
+  push:
+    tags:
+      - 'v*-ytray-en'
+
+permissions:
+  contents: write
+
+jobs:
+  build-ytray:
+    name: "Build YTray (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            ext: .exe
+          - os: ubuntu-latest
+            platform: linux
+            ext: ""
+          - os: macos-latest
+            platform: darwin
+            ext: ""
+    steps:
+      - name: "1. Checkout Source"
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.ref_name || 'english-edition' }}
+
+      - name: "2. Setup Golang"
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: "3. Install Linux System Tray Dependencies"
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ libgtk-3-dev libayatana-appindicator3-dev || \
+          sudo apt-get install -y gcc g++ libgtk-3-dev libappindicator3-dev
+
+      - name: "4. Build YTray Binary"
+        shell: bash
+        run: |
+          mkdir -p dist
+          go mod tidy
+          MAIN_PATH="."
+          if [ -d "./cmd/ytray" ]; then
+            MAIN_PATH="./cmd/ytray"
+          elif [ -f "./main.go" ]; then
+            MAIN_PATH="./main.go"
+          fi
+
+          if [ "${{ matrix.platform }}" == "windows" ]; then
+            go build -trimpath -ldflags="-s -w -H=windowsgui" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH" || \
+            go build -trimpath -ldflags="-s -w" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH"
+          else
+            go build -trimpath -ldflags="-s -w" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH"
+          fi
+          ls -lh dist/
+
+      - name: "5. Upload Artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ytray-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: warn
+
+  publish-release:
+    name: "Publish YTray English Release"
+    needs: build-ytray
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: "1. Download Artifacts"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ytray-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: "2. Publish GitHub Release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name || 'vlatest-ytray-en' }}
+          name: "YTray English Edition (${{ inputs.tag_name || github.ref_name }})"
+          overwrite: true
+          files: release-assets/*
