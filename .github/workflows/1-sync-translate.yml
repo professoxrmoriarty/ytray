@@ -45,8 +45,8 @@ jobs:
           if [ -f ".i18n_cache.json" ]; then
             cp .i18n_cache.json /tmp/backup/.i18n_cache.json
           fi
-          if [ -f "README.md" ]; then
-            cp README.md /tmp/backup/README.md
+          if [ -f "VERSION" ]; then
+            cp VERSION /tmp/backup/VERSION
           fi
 
           git remote add upstream "${{ env.UPSTREAM_REPO }}" 2>/dev/null || git remote set-url upstream "${{ env.UPSTREAM_REPO }}"
@@ -75,8 +75,8 @@ jobs:
           if [ -f "/tmp/backup/.i18n_cache.json" ]; then
             cp /tmp/backup/.i18n_cache.json .i18n_cache.json
           fi
-          if [ -f "/tmp/backup/README.md" ]; then
-            cp /tmp/backup/README.md README.md
+          if [ -f "/tmp/backup/VERSION" ]; then
+            cp /tmp/backup/VERSION VERSION
           fi
 
           # yakit နှင့် yaklang တို့မှ ဘာသာပြန်ပြီးသား Cache နှင့် Glossary ကို လှမ်းယူမည်
@@ -85,6 +85,7 @@ jobs:
             cp /tmp/yakit_fork/.i18n_cache.json /tmp/yakit_cache.json
           fi
           if [ ! -f ".github/security_glossary.json" ] && [ -f "/tmp/yakit_fork/.github/security_glossary.json" ]; then
+            mkdir -p .github
             cp /tmp/yakit_fork/.github/security_glossary.json .github/security_glossary.json
           fi
           rm -rf /tmp/yakit_fork
@@ -95,21 +96,16 @@ jobs:
           fi
           rm -rf /tmp/yaklang_fork
 
-      - name: "3. Setup Golang & Python"
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.x'
-
-      - name: "4. Setup Python & Install Dependencies"
+      - name: "3. Setup Python"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: "5. Install Translation Libraries"
+      - name: "4. Install Translation Libraries"
         run: |
           python3 -m pip install --upgrade pip deep-translator PyYAML
 
-      - name: "6. Progressive Translation (Go, TS/JS, JSON, HTML & YAML)"
+      - name: "5. Progressive Translation (Go, Swift, JSON & YAML)"
         id: translate
         run: |
           python3 - << 'EOF'
@@ -121,7 +117,7 @@ jobs:
           START_TIME = time.time()
           MAX_RUNTIME_SECONDS = 45 * 60
           MAX_CONSECUTIVE_FAILURES = 5
-          IGNORE_DIRS = {".git", ".github", "vendor", "node_modules", "build", "dist"}
+          IGNORE_DIRS = {".git", ".github", "vendor", "node_modules", "build", "dist", ".build"}
 
           translator = GoogleTranslator(source='zh-CN', target='en')
           zh_char_re = re.compile(r'[\u4e00-\u9fff]')
@@ -144,7 +140,6 @@ jobs:
                   pass
           sorted_inline_keys = sorted(inline_glossary.keys(), key=len, reverse=True)
 
-          # Merge caches from yaklang, yakit, and local ytray
           cache = {}
           for cf in ("/tmp/yaklang_cache.json", "/tmp/yakit_cache.json", CACHE_FILE):
               if os.path.exists(cf):
@@ -191,7 +186,7 @@ jobs:
           for root, dirs, files in os.walk("."):
               dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
               for file in files:
-                  if file.endswith(('.go', '.ts', '.tsx', '.js', '.jsx', '.json')) and not file.endswith('_test.go'):
+                  if file.endswith(('.go', '.swift', '.ts', '.tsx', '.js', '.json', '.yaml', '.yml')) and not file.endswith('_test.go'):
                       p = os.path.join(root, file)
                       try:
                           with open(p, 'r', encoding='utf-8') as f:
@@ -205,7 +200,7 @@ jobs:
                           comment, raw_s, dq_s, sq_s = m.groups()
                           if comment or raw_s:
                               continue
-                          tok = dq_s or (sq_s if not file.endswith('.go') else None)
+                          tok = dq_s or sq_s
                           if tok and has_zh(tok):
                               inner = tok[1:-1]
                               if len(inner) <= 500:
@@ -242,12 +237,11 @@ jobs:
           for p in target_files:
               with open(p, 'r', encoding='utf-8') as f:
                   c = f.read()
-              is_go = p.endswith('.go')
               def repl(m):
                   comment, raw_s, dq_s, sq_s = m.groups()
                   if comment or raw_s:
                       return m.group(0)
-                  tok = dq_s or (sq_s if not is_go else None)
+                  tok = dq_s or sq_s
                   if tok and has_zh(tok):
                       q = tok[0]
                       inner = tok[1:-1]
@@ -271,19 +265,7 @@ jobs:
               f.write(f"remaining_count={len(remaining)}\n")
           EOF
 
-      - name: "7. Go Syntax Safety Check (gofmt Auto-Revert)"
-        run: |
-          UP_REF="upstream/${{ env.UPSTREAM_BRANCH }}"
-          if ! git rev-parse --verify "$UP_REF" >/dev/null 2>&1; then
-            UP_REF="upstream/master"
-          fi
-          for f in $(git ls-files --modified '*.go'); do
-            if [ -f "$f" ] && ! gofmt -e "$f" >/dev/null 2>&1; then
-              git checkout HEAD -- "$f" 2>/dev/null || git checkout "$UP_REF" -- "$f" 2>/dev/null || true
-            fi
-          done
-
-      - name: "8. Commit Progress & Trigger Release When 100% Complete"
+      - name: "6. Commit Progress & Trigger Release When 100% Complete"
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
@@ -299,8 +281,9 @@ jobs:
           fi
 
           if [ "${{ steps.translate.outputs.is_complete }}" == "true" ] || [ "${{ inputs.force_release }}" == "true" ]; then
-            EN_TAG="v$(date +'%Y.%m.%d')-ytray-en"
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+            EN_TAG="v${VERSION}-ytray-en"
             git tag -f "${EN_TAG}" HEAD
             git push origin "refs/tags/${EN_TAG}" --force
-            gh workflow run 2-build-release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" || true
+            gh workflow run release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" || true
           fi
