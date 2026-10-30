@@ -1,16 +1,22 @@
-name: Release
+name: "Release (English Edition)"
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag_name:
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag အမည် (ဥပမာ v0.1.5-ytray-en)'
+        required: false
+        default: ''
+  push:
+    tags: ["*-ytray-en"]
 
 permissions:
   contents: write
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   version:
