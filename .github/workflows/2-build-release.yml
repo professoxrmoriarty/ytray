@@ -32,6 +32,9 @@ on:
 permissions:
   contents: write
 
+env:
+  CUSTOM_EXT_REPO: "professoxrmoriarty/yaklang-chrome-extension"
+
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: Version သတ်မှတ်ခြင်း (VERSION ဖိုင်မှ ဖတ်ယူခြင်း)
@@ -101,7 +104,19 @@ jobs:
       - name: "2. Install Inno Setup"
         run: choco install innosetup -y --no-progress
 
-      - name: "3. Build & Package Windows Installer (with Auto-Heal Fallback)"
+      - name: "3. Inject English Chrome Extension (yakit-browser-agent.zip)"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p windows/src/Assets/BundledExtension
+          if gh release download --repo "${{ env.CUSTOM_EXT_REPO }}" --pattern "yakit-browser-agent.zip" --output "windows/src/Assets/BundledExtension/yakit-browser-agent.zip" --clobber 2>/dev/null; then
+            echo "Successfully injected English yakit-browser-agent.zip from ${{ env.CUSTOM_EXT_REPO }}"
+          else
+            echo "English extension release not found yet; using default bundled extension."
+          fi
+
+      - name: "4. Build & Package Windows Installer (with Auto-Heal Fallback)"
         shell: pwsh
         run: |
           $ver = "${{ needs.version.outputs.version }}"
@@ -120,7 +135,7 @@ jobs:
 
           Get-ChildItem "windows/artifacts/$arch"
 
-      - name: "4. Upload Windows Artifacts"
+      - name: "5. Upload Windows Artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: release-windows-${{ matrix.arch }}
@@ -156,8 +171,10 @@ jobs:
           echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
           command -v magick >/dev/null 2>&1 || brew install imagemagick
 
-      - name: "3. Package macOS App & Create DMG (with Auto-Heal Fallback)"
+      - name: "3. Package macOS App, Inject English Extension & Create DMG"
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           VER="${{ needs.version.outputs.version }}"
           ARCH="${{ matrix.arch }}"
@@ -170,6 +187,14 @@ jobs:
             git fetch --depth=1 upstream main
             git checkout FETCH_HEAD -- darwin/
             ./script/package-macos.sh --arch "${ARCH}" --version "${VER}"
+          fi
+
+          # macOS YTray.app အတွင်းရှိ BundledExtension ကို English yakit-browser-agent.zip ဖြင့် အစားထိုးမည်
+          EXT_TARGET="dist/darwin-${ARCH}/YTray.app/Contents/Resources/BundledExtension/yakit-browser-agent.zip"
+          if [ -d "$(dirname "$EXT_TARGET")" ]; then
+            if gh release download --repo "${{ env.CUSTOM_EXT_REPO }}" --pattern "yakit-browser-agent.zip" --output "$EXT_TARGET" --clobber 2>/dev/null; then
+              echo "Successfully injected English yakit-browser-agent.zip into macOS YTray.app"
+            fi
           fi
 
           ./script/create-macos-dmg.sh "dist/darwin-${ARCH}/YTray.app" "${VER}" "${ARCH}"
@@ -220,7 +245,7 @@ jobs:
           body: |
             ### YTray English Edition — ${{ needs.version.outputs.release_tag }}
             * **Version:** `v${{ needs.version.outputs.version }}`
-            * **Integrated Ecosystem:** Shares translation cache & security glossary with `professoxrmoriarty/yakit` and `professoxrmoriarty/yaklang`.
+            * **Integrated Ecosystem:** Shares translation cache & security glossary with `professoxrmoriarty/yakit`, `professoxrmoriarty/yaklang`, and bundles `professoxrmoriarty/yaklang-chrome-extension`.
             * **Supported Installers:**
               * **Windows:** `YTray-${{ needs.version.outputs.version }}-windows-amd64-setup.exe` & `386-setup.exe`
               * **macOS:** `YTray-${{ needs.version.outputs.version }}-darwin-arm64.dmg` & `amd64.dmg`
