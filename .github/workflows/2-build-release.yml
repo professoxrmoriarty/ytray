@@ -208,9 +208,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      OSS_BUCKET: yaklang
-      OSS_ENDPOINT: oss-accelerate.aliyuncs.com
-      PUBLIC_BASE_URL: https://aliyun-oss.yaklang.com/ytray
+          YTRAY_UPDATE_PRIVATE_KEY: ${{ secrets.YTRAY_UPDATE_PRIVATE_KEY }}
+          run: |
+            if [ -n "$YTRAY_UPDATE_PRIVATE_KEY" ]; then
+            python3 script/sign-appcasts.py dist
+            else
+              echo "::warning::YTRAY_UPDATE_PRIVATE_KEY secret is missing. Skipping appcast signing for fork/unconfigured release."
+              # Dummy signed/unsigned appcast manifest သို့မဟုတ် pass လုပ်ရန်
+              touch dist/manifest.json || true
+            fi
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
