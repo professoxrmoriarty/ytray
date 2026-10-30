@@ -295,12 +295,14 @@ jobs:
             else
               git commit -m "chore(i18n): save ytray translation progress (${{ steps.translate.outputs.remaining_count }} left) [skip ci]"
             fi
-            git push -u origin "${{ env.TARGET_BRANCH }}" --force
+            # Ambiguous refspec error မတက်စေရန် HEAD:refs/heads/<branch> ကို အသုံးပြုခြင်း
+            git push origin HEAD:refs/heads/${{ env.TARGET_BRANCH }} --force
           fi
 
           if [ "${{ steps.translate.outputs.is_complete }}" == "true" ] || [ "${{ inputs.force_release }}" == "true" ]; then
-            EN_TAG="v$(date +'%Y.%m.%d')-ytray-en"
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+            EN_TAG="v${VERSION}-ytray-en"
             git tag -f "${EN_TAG}" HEAD
             git push origin "refs/tags/${EN_TAG}" --force
-            gh workflow run 2-build-release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" || true
+            gh workflow run release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" || true
           fi
