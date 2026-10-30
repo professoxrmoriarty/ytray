@@ -130,7 +130,8 @@
     "\\bssti\\b": "SSTI",
     "\\bpoc\\b": "PoC"
   },
-  "__glossary_snapshot__": {
+  {
+    "__glossary_snapshot__": {
     "MITM劫持": "MITM Intercept",
     "免配置劫持": "Zero-Config Intercept",
     "HotPatch": "HotPatch",
@@ -235,7 +236,6 @@
     "Output": "Output",
     "提权": "PrivEsc"
   },
-  {
   "Low": "Low",
   "Reverse Connection": "Reverse Connection",
   "Unauthorized Access": "Unauthorized Access",
