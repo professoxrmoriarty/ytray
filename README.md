@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yaklang/ytray/actions/workflows/darwin.yml"><img alt="macOS CI" src="https://github.com/yaklang/ytray/actions/workflows/darwin.yml/badge.svg"></a>
-  <a href="https://github.com/yaklang/ytray/actions/workflows/windows.yml"><img alt="Windows CI" src="https://github.com/yaklang/ytray/actions/workflows/windows.yml/badge.svg"></a>
-  <a href="https://github.com/yaklang/ytray/actions/workflows/pages.yml"><img alt="Pages" src="https://github.com/yaklang/ytray/actions/workflows/pages.yml/badge.svg"></a>
+  <a href="https://github.com/professoxrmoriarty/ytray/actions/workflows/2-build-release.yml"><img alt="macOS CI" src="https://github.com/yaklang/ytray/actions/workflows/darwin.yml/badge.svg"></a>
+  <a href="https://github.com/professoxrmoriarty/ytray/actions/workflows/2-build-release.yml"><img alt="Windows CI" src="https://github.com/yaklang/ytray/actions/workflows/windows.yml/badge.svg"></a>
+  <a href="https://github.com/professoxrmoriarty/ytray/actions/workflows/2-build-release.yml"><img alt="Pages" src="https://github.com/yaklang/ytray/actions/workflows/pages.yml/badge.svg"></a>
 </p>
 
 <p align="center">
   <a href="https://yaklang.io/ytray/">官方网站</a> ·
-  <a href="https://github.com/yaklang/ytray/releases/latest">下载最新版</a> ·
+  <a href="https://github.com/professoxrmoriarty/ytray/releases/latest">下载最新版</a> ·
   <a href="https://aliyun-oss.yaklang.com/ytray/latest.json">发布清单</a>
 </p>
 
