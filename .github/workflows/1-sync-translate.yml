@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: "2. Configure Git & Sync Upstream Diffs"
+      - name: "2. Configure Git & Smart Diff Sync Upstream"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -59,6 +59,7 @@ jobs:
 
           git checkout -B "${{ env.TARGET_BRANCH }}" "origin/${{ env.TARGET_BRANCH }}" 2>/dev/null || git checkout -B "${{ env.TARGET_BRANCH }}" "$UP_REF"
 
+          # မူရင်း Repo တစ်ခုလုံးကို ပြန်မဆွဲဘဲ ပြောင်းလဲသွားသော Diff များကိုသာ Merge လုပ်မည်
           if ! git merge "$UP_REF" -X theirs --allow-unrelated-histories --no-edit; then
             git status --porcelain | awk '$1=="DU" || $1=="UD" {print $2}' | xargs -r git rm -f
             git checkout --theirs . || true
@@ -66,9 +67,12 @@ jobs:
             git commit --no-edit || true
           fi
 
+          # Upstream မှ ပါလာသော workflows များကို ဖယ်ရှားပြီး မိမိ၏ workflow (၂) ဖိုင်ကိုသာ ပြန်ထားမည်
           rm -rf .github/workflows/*
           mkdir -p .github/workflows
-          cp -r /tmp/backup/workflows/* .github/workflows/ 2>/dev/null || true
+          cp /tmp/backup/workflows/1-sync-translate.yml .github/workflows/ 2>/dev/null || true
+          cp /tmp/backup/workflows/2-build-release.yml .github/workflows/ 2>/dev/null || true
+
           if [ -f "/tmp/backup/security_glossary.json" ]; then
             cp /tmp/backup/security_glossary.json .github/security_glossary.json
           fi
@@ -79,7 +83,7 @@ jobs:
             cp /tmp/backup/README.md README.md
           fi
 
-          # yakit နှင့် yaklang တို့မှ ဘာသာပြန်ပြီးသား Cache နှင့် Glossary ကို လှမ်းယူမည်
+          # professoxrmoriarty/yakit နှင့် professoxrmoriarty/yaklang တို့မှ Cache နှင့် Glossary ကို ချိတ်ဆက်ယူမည်
           git clone --depth 1 --branch english-edition "${{ env.YAKIT_FORK_REPO }}" /tmp/yakit_fork 2>/dev/null || true
           if [ -f "/tmp/yakit_fork/.i18n_cache.json" ]; then
             cp /tmp/yakit_fork/.i18n_cache.json /tmp/yakit_cache.json
@@ -95,25 +99,21 @@ jobs:
           fi
           rm -rf /tmp/yaklang_fork
 
-      - name: "3. Setup Golang & Python"
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.x'
-
-      - name: "4. Setup Python & Install Dependencies"
+      - name: "3. Setup Python"
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: "5. Install Translation Libraries"
+      - name: "4. Install Translation Libraries"
         run: |
           python3 -m pip install --upgrade pip deep-translator PyYAML
 
-      - name: "6. Progressive Translation (Go, TS/JS, JSON, HTML & YAML)"
+      - name: "5. Progressive Translation (C#, XAML, Swift, TS/JS, JSON & HTML)"
         id: translate
         run: |
           python3 - << 'EOF'
           import os, re, json, time, yaml
+          import xml.etree.ElementTree as ET
           from deep_translator import GoogleTranslator
 
           CACHE_FILE = ".i18n_cache.json"
@@ -121,11 +121,19 @@ jobs:
           START_TIME = time.time()
           MAX_RUNTIME_SECONDS = 45 * 60
           MAX_CONSECUTIVE_FAILURES = 5
-          IGNORE_DIRS = {".git", ".github", "vendor", "node_modules", "build", "dist"}
+
+          # Test ဖိုင်များနှင့် Build scripts များကို ဘာသာမပြန်ရန် ချန်လှပ်ထားမည် (Build မပျက်စေရန်)
+          IGNORE_DIRS = {
+              ".git", ".github", "vendor", "node_modules", "build", "dist",
+              ".build", "bin", "obj", "Tests", "tests", "YTrayTests",
+              "macos-ui-tests", "artifacts", "assets", "docs"
+          }
+          IGNORE_STRINGS = {"微软雅黑", "宋体", "黑体", "苹方", "楷体", "仿宋", "Microsoft YaHei", "PingFang SC"}
 
           translator = GoogleTranslator(source='zh-CN', target='en')
           zh_char_re = re.compile(r'[\u4e00-\u9fff]')
-          placeholder_re = re.compile(r'(\{\{.*?\}\}|%[+#0 -]*\d*(?:\.\d+)?[svTtbcdoqxXUeEfFgGp%]|\\[nrt"\\])')
+          # C# {0}, Swift \(...), printf %s, and escaped sequences \n \r \t
+          placeholder_re = re.compile(r'(\\\([^()\n]+\)|\{\d+(?:[:,][^}\n]+)?\}|\{\{.*?\}\}|%[+#0 -]*\d*(?:\.\d+)?[svTtbcdoqxXUeEfFgGp@%]|\\[nrt"\\])')
 
           def has_zh(text):
               return bool(zh_char_re.search(str(text)))
@@ -144,7 +152,7 @@ jobs:
                   pass
           sorted_inline_keys = sorted(inline_glossary.keys(), key=len, reverse=True)
 
-          # Merge caches from yaklang, yakit, and local ytray
+          # yaklang, yakit နှင့် ytray cache သုံးခုလုံးကို ပေါင်းစပ်ဖတ်မည်
           cache = {}
           for cf in ("/tmp/yaklang_cache.json", "/tmp/yakit_cache.json", CACHE_FILE):
               if os.path.exists(cf):
@@ -178,20 +186,23 @@ jobs:
                   masked = re.sub(rf'__PH{idx}__', lambda _: tok, masked, flags=re.IGNORECASE)
               return re.sub(r' {2,}', ' ', masked).strip()
 
+          # Comments, Verbatim/Interpolated strings ($"...", @"..."), Normal strings ("..."), and XAML text (>...<)
           TOKEN_RE = re.compile(
-              r'(//[^\n]*|/\*[\s\S]*?\*/)'
-              r'|(`[^`]*`)'
+              r'(//[^\n]*|/\*[\s\S]*?\*/|<!--[\s\S]*?-->)'
+              r'|(\$"[^"\n]*"|@"[^"]*"|"""[\s\S]*?""")'
               r'|("(?:\\.|[^"\\\n])*")'
-              r"|('(?:\\.|[^'\\\n])*')"
+              r'|(>[^<>{}`"\']*?[\u4e00-\u9fff]+[^<>{}`"\']*?<)'
           )
 
           target_files = []
           zh_strings = set()
 
           for root, dirs, files in os.walk("."):
-              dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+              dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.endswith('Tests')]
               for file in files:
-                  if file.endswith(('.go', '.ts', '.tsx', '.js', '.jsx', '.json')) and not file.endswith('_test.go'):
+                  if "Test" in file or "test" in file:
+                      continue
+                  if file.endswith(('.cs', '.xaml', '.swift', '.ts', '.tsx', '.js', '.jsx', '.json')):
                       p = os.path.join(root, file)
                       try:
                           with open(p, 'r', encoding='utf-8') as f:
@@ -201,26 +212,32 @@ jobs:
                       if not has_zh(c):
                           continue
                       has_target = False
+                      is_xml = file.endswith('.xaml')
                       for m in TOKEN_RE.finditer(c):
-                          comment, raw_s, dq_s, sq_s = m.groups()
-                          if comment or raw_s:
+                          comment, special_s, dq_s, xml_s = m.groups()
+                          if comment or special_s:
                               continue
-                          tok = dq_s or (sq_s if not file.endswith('.go') else None)
-                          if tok and has_zh(tok):
-                              inner = tok[1:-1]
-                              if len(inner) <= 500:
+                          if dq_s and has_zh(dq_s):
+                              inner = dq_s[1:-1]
+                              if inner.strip() not in IGNORE_STRINGS and len(inner) <= 400 and "\\(" not in inner:
+                                  zh_strings.add(inner)
+                                  has_target = True
+                          elif is_xml and xml_s and has_zh(xml_s):
+                              inner = xml_s[1:-1].strip()
+                              if inner and inner not in IGNORE_STRINGS and len(inner) <= 400:
                                   zh_strings.add(inner)
                                   has_target = True
                       if has_target:
                           target_files.append(p)
 
           uncached = [s for s in zh_strings if (s not in cache or has_zh(cache.get(s, ""))) and has_zh(s)]
-          print(f"Found {len(zh_strings)} Chinese strings ({len(uncached)} uncached).")
+          print(f"Found {len(zh_strings)} translatable strings in YTray ({len(uncached)} uncached).")
 
           limit_reached = False
           failures = 0
           for idx, s in enumerate(uncached):
               if time.time() - START_TIME > MAX_RUNTIME_SECONDS or failures >= MAX_CONSECUTIVE_FAILURES:
+                  print("Limit reached! Saving cache checkpoint and pausing for next run...")
                   limit_reached = True
                   break
               try:
@@ -235,55 +252,67 @@ jobs:
                   time.sleep(1.5)
               if (idx + 1) % 25 == 0:
                   save_cache()
+                  print(f"Progress: {idx + 1}/{len(uncached)} saved to cache.")
                   time.sleep(0.4)
 
           save_cache()
 
           for p in target_files:
-              with open(p, 'r', encoding='utf-8') as f:
-                  c = f.read()
-              is_go = p.endswith('.go')
+              try:
+                  with open(p, 'r', encoding='utf-8') as f:
+                      c = f.read()
+              except Exception:
+                  continue
+              is_xml = p.endswith('.xaml')
+              is_cs = p.endswith('.cs')
+
               def repl(m):
-                  comment, raw_s, dq_s, sq_s = m.groups()
-                  if comment or raw_s:
+                  comment, special_s, dq_s, xml_s = m.groups()
+                  if comment or special_s:
                       return m.group(0)
-                  tok = dq_s or (sq_s if not is_go else None)
-                  if tok and has_zh(tok):
-                      q = tok[0]
-                      inner = tok[1:-1]
-                      if inner in cache and not has_zh(cache[inner]):
-                          tr = cache[inner].replace('\r', ' ').replace('\n', '\\n')
-                          if q == '"':
-                              tr = re.sub(r'(?<!\\)"', r'\"', tr)
-                          else:
-                              tr = re.sub(r"(?<!\\)'", r"\'", tr)
-                          return f"{q}{tr}{q}"
+                  if dq_s and has_zh(dq_s):
+                      inner = dq_s[1:-1]
+                      if inner.strip() in IGNORE_STRINGS or inner not in cache or has_zh(cache[inner]) or "\\(" in inner:
+                          return dq_s
+                      tr = cache[inner].replace('\r', ' ').replace('\n', '\\n')
+                      tr = re.sub(r'(?<!\\)"', r'\"', tr)
+                      if is_xml:
+                          tr = tr.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\\"', '&quot;')
+                      return f'"{tr}"'
+                  if is_xml and xml_s and has_zh(xml_s):
+                      raw_inner = xml_s[1:-1]
+                      stripped = raw_inner.strip()
+                      if stripped in cache and not has_zh(cache[stripped]):
+                          tr = cache[stripped].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                          lead = raw_inner[:len(raw_inner) - len(raw_inner.lstrip())]
+                          trail = raw_inner[len(raw_inner.rstrip()):]
+                          return f">{lead}{tr}{trail}<"
                   return m.group(0)
+
               nc = TOKEN_RE.sub(repl, c)
               if nc != c:
-                  with open(p, 'w', encoding='utf-8') as f:
-                      f.write(nc)
+                  # JSON နှင့် XAML ဖိုင်များ Syntax မှန်ကန်မှု ချက်ချင်းစစ်ဆေးမည်
+                  valid = True
+                  if p.endswith('.json'):
+                      try: json.loads(nc)
+                      except Exception: valid = False
+                  elif p.endswith('.xaml'):
+                      try: ET.fromstring(nc)
+                      except Exception: valid = False
+                  if valid:
+                      with open(p, 'w', encoding='utf-8') as f:
+                          f.write(nc)
 
           remaining = [s for s in zh_strings if s not in cache or has_zh(cache.get(s, ""))]
           is_complete = (len(remaining) == 0) and (not limit_reached)
+          print(f"=== YTray Translation Summary ===")
+          print(f"Total cached: {len(cache)} | Remaining: {len(remaining)} | Complete: {is_complete}")
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"is_complete={'true' if is_complete else 'false'}\n")
               f.write(f"remaining_count={len(remaining)}\n")
           EOF
 
-      - name: "7. Go Syntax Safety Check (gofmt Auto-Revert)"
-        run: |
-          UP_REF="upstream/${{ env.UPSTREAM_BRANCH }}"
-          if ! git rev-parse --verify "$UP_REF" >/dev/null 2>&1; then
-            UP_REF="upstream/master"
-          fi
-          for f in $(git ls-files --modified '*.go'); do
-            if [ -f "$f" ] && ! gofmt -e "$f" >/dev/null 2>&1; then
-              git checkout HEAD -- "$f" 2>/dev/null || git checkout "$UP_REF" -- "$f" 2>/dev/null || true
-            fi
-          done
-
-      - name: "8. Commit Progress & Trigger Release When 100% Complete"
+      - name: "6. Commit Progress & Trigger Release When 100% Complete"
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
@@ -295,14 +324,15 @@ jobs:
             else
               git commit -m "chore(i18n): save ytray translation progress (${{ steps.translate.outputs.remaining_count }} left) [skip ci]"
             fi
-            # Ambiguous refspec error မတက်စေရန် HEAD:refs/heads/<branch> ကို အသုံးပြုခြင်း
             git push origin HEAD:refs/heads/${{ env.TARGET_BRANCH }} --force
           fi
 
           if [ "${{ steps.translate.outputs.is_complete }}" == "true" ] || [ "${{ inputs.force_release }}" == "true" ]; then
-            VERSION="$(tr -d '[:space:]' < VERSION)"
+            VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo '0.2.3')"
             EN_TAG="v${VERSION}-ytray-en"
             git tag -f "${EN_TAG}" HEAD
             git push origin "refs/tags/${EN_TAG}" --force
-            gh workflow run release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" || true
+            echo "Triggering 2-build-release.yml for ${EN_TAG}..."
+            gh workflow run 2-build-release.yml --ref "${{ env.TARGET_BRANCH }}" -f tag_name="${EN_TAG}" -f target_ref="${{ env.TARGET_BRANCH }}" || \
+            gh workflow run 2-build-release.yml -f tag_name="${EN_TAG}" -f target_ref="${{ env.TARGET_BRANCH }}" || true
           fi
