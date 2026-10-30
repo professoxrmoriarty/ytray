@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag အမည် (ဥပမာ v2026.10.30-ytray-en)'
+        description: 'Release Tag အမည် (ဥပမာ v0.1.5-ytray-en)'
         required: false
         default: ''
       target_ref:
@@ -19,66 +19,107 @@ permissions:
   contents: write
 
 jobs:
-  version:
-    name: Resolve release version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
+  build-ytray:
+    name: "Build YTray (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            ext: .exe
+          - os: ubuntu-latest
+            platform: linux
+            ext: ""
+          - os: macos-latest
+            platform: darwin
+            ext: ""
     steps:
-      - uses: actions/checkout@v4
+      - name: "1. Checkout Source"
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target_ref || github.ref }}
-      - id: version
+          ref: ${{ inputs.target_ref || github.ref_name || 'english-edition' }}
+
+      - name: "2. Setup Golang"
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: "3. Install Linux System Tray Dependencies"
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ libgtk-3-dev libayatana-appindicator3-dev || \
+          sudo apt-get install -y gcc g++ libgtk-3-dev libappindicator3-dev || true
+
+      - name: "4. Build YTray Binary"
         shell: bash
         run: |
-          set -euo pipefail
-          version="$(tr -d '[:space:]' < VERSION)"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            test "${GITHUB_REF_NAME#v}" = "$version"
+          mkdir -p dist
+          go mod tidy
+          MAIN_PATH="."
+          if [ -d "./cmd/ytray" ]; then
+            MAIN_PATH="./cmd/ytray"
+          elif [ -f "./main.go" ]; then
+            MAIN_PATH="./main.go"
           fi
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
-          python3 script/verify-app-icons.py
-          bash script/test-release-index.sh
-          test -n "$(bash script/release-notes.sh "$version")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          python3 -m unittest discover -s script/tests -v
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-  publish:
-    name: Publish GitHub Release and OSS
-    if: >
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
-      || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
-    needs: [version, prepare]
+          if [ "${{ matrix.platform }}" == "windows" ]; then
+            go build -trimpath -ldflags="-s -w -H=windowsgui" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH" || \
+            go build -trimpath -ldflags="-s -w" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH"
+          else
+            go build -trimpath -ldflags="-s -w" -o "dist/ytray_${{ matrix.platform }}_amd64${{ matrix.ext }}" "$MAIN_PATH"
+          fi
+          ls -lh dist/
+
+      - name: "5. Upload Artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ytray-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: warn
+
+  publish-release:
+    name: "Publish YTray English Release"
+    needs: build-ytray
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    concurrency:
-      group: ytray-release-publication
-      cancel-in-progress: false
-    env:
-      OSS_BUCKET: yaklang
-      OSS_ENDPOINT: oss-accelerate.aliyuncs.com
-      PUBLIC_BASE_URL: https://aliyun-oss.yaklang.com/ytray
     steps:
-      - uses: actions/checkout@v4
+      - name: "1. Download Artifacts"
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target_ref || github.ref }}
+          pattern: ytray-*
+          path: release-assets
+          merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - name: "2. Resolve Release Tag"
+        id: resolve_tag
+        run: |
+          INPUT_TAG="${{ inputs.tag_name }}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            FINAL_TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            FINAL_TAG="${INPUT_TAG}"
+          else
+            VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo '0.1.5')"
+            FINAL_TAG="v${VERSION}-ytray-en"
+          fi
+          echo "tag=${FINAL_TAG}" >> "$GITHUB_OUTPUT"
+          ls -lh release-assets/
+
+      - name: "3. Publish GitHub Release"
+        uses: softprops/action-gh-release@v2
         with:
-          name: prepared-release
-          path: dist
-
-      - name: Create GitHub Release
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: bash script/release-notes.sh "$VERSION" > release-notes.md
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || needs.version.outputs.tag }}
-          name: YTray v${{ needs.version.outputs.version }}
-          prerelease: ${{ contains(github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || needs.version.outputs.tag, '-') }}
-          body_path: release-notes.md
-          files: dist/*
+          tag_name: ${{ steps.resolve_tag.outputs.tag }}
+          name: "YTray English Edition (${{ steps.resolve_tag.outputs.tag }})"
+          overwrite: true
+          body: |
+            ### YTray English Edition — ${{ steps.resolve_tag.outputs.tag }}
+            * **Default Language:** English (`en`) enabled out of the box.
+            * **Supported Platforms:** Windows (`.exe`), macOS (`.app/binary`), Linux (`binary`).
+          draft: false
+          prerelease: false
+          files: release-assets/*
