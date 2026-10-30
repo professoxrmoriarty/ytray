@@ -1,19 +1,19 @@
 name: "2. Build & Release YTray (English Edition)"
 
 on:
-  workflow_call:
-    inputs:
-      tag_name:
-        type: string
-        required: true
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag အမည် (ဥပမာ v0.1.5-ytray-en)'
+        description: 'Release Tag အမည် (ဥပမာ v2026.10.30-ytray-en)'
         required: false
         default: ''
+      target_ref:
+        description: 'Build လုပ်မည့် Branch (ပုံမှန် english-edition)'
+        required: false
+        default: 'english-edition'
   push:
-    tags: ["*-ytray-en"]
+    tags:
+      - 'v*-ytray-en'
 
 permissions:
   contents: write
